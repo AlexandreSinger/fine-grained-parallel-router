@@ -1,0 +1,15 @@
+
+# Ignore the large benchmarks directory
+benchmarks/
+
+# Ignore the results directory
+results/
+
+# Ignore all temp directories
+temp*/
+
+# Ignore all dump fules
+*.dump
+
+# Ignore the gprof files
+gprof.txt
