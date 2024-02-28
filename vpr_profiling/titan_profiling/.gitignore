@@ -1,0 +1,9 @@
+
+# Ignore the benchmarks folder which can be extremely large
+benchmarks/
+
+# Ignore any dump files generated
+*.dump
+
+# Ignore the temp directories
+temp_*/
