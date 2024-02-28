@@ -1,0 +1,6 @@
+
+# Ignore the input_data directory since these CSV files can be extremely large.
+input_data/
+
+# Ignore the output figures for the same reason.
+output_figures/
