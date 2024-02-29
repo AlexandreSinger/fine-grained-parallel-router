@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 
 # The name of the circuit to analyze the connections of
-CIRCUIT_NAME = "gsm_switch"
+CIRCUIT_NAME = "bwave_like.float.large-fcin"
 
 # Calculate the percentage of the runtime that the top 1% of the connections are
 # taking. Or, in other words, 1% of the connections make up X% of the runtime.
@@ -46,7 +46,7 @@ def plotCDF(arr):
     # Set the yaxis to use percentages
     plt.gca().yaxis.set_major_formatter(mtick.PercentFormatter())
     # Save the figure to the output figures directory
-    plt.savefig("output_figures/connection_route_time_cdf_" + CIRCUIT_NAME + ".png", dpi=300)
+    plt.savefig("output_figures/connection_route_time_cdf_" + CIRCUIT_NAME + ".png", dpi=300, bbox_inches="tight")
 
 # Helper method for plotting the connection route times.
 def plotConnectionRouteTimes(df):
@@ -58,7 +58,7 @@ def plotConnectionRouteTimes(df):
     # Plot the connection route times in a logy scale.
     ax = df.plot.scatter(x="index", y=2, c=conn_color, logy=True, title="Connection Route Time Per Execution Call for " + CIRCUIT_NAME)
     # Save the figure to the output figures directory
-    plt.savefig("output_figures/connection_route_time_plot_" + CIRCUIT_NAME + ".png", dpi=300)
+    plt.savefig("output_figures/connection_route_time_plot_" + CIRCUIT_NAME + ".png", dpi=300, bbox_inches="tight")
 
 # Read the CSV file of the data
 print("Reading data for:", CIRCUIT_NAME)
