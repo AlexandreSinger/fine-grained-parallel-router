@@ -8,7 +8,8 @@ set -ex
 
 VTR_ROOT=~/vtr-verilog-to-routing
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-ARCH=$SCRIPT_DIR/architectures/k6_frac_N10_frac_chain_mem32K_equivalence_40nm.xml
+ARCH=$SCRIPT_DIR/architectures/k6_frac_N10_frac_chain_mem32K_fcin_40nm.xml
+# ARCH=$SCRIPT_DIR/architectures/k6_frac_N10_frac_chain_mem32K_equivalence_40nm.xml
 TEST_FILE_NAME=bwave_like.float.large
 TEST_FILE=$VTR_ROOT/vtr_flow/benchmarks/verilog/koios/$TEST_FILE_NAME.v
 CHANNEL_WIDTH=326
@@ -28,7 +29,7 @@ $VTR_ROOT/vtr_flow/scripts/run_vtr_flow.py \
 cd ..
 
 # Save the pre-computed circuit data
-BENCHMARK_DIR=$SCRIPT_DIR/benchmarks/$TEST_FILE_NAME-equiv
+BENCHMARK_DIR=$SCRIPT_DIR/benchmarks/$TEST_FILE_NAME-fcin
 
 if [ ! -d "$BENCHMARK_DIR" ]; then
 	echo "Benchmark directory not found, creating and populating"
