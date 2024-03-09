@@ -1,0 +1,6 @@
+
+# Ignore the pre computed benchmarks. These are tied to the version of VPR, and are large.
+benchmark_pre_compute_*/
+
+# Ignore the temp folder.
+temp/
