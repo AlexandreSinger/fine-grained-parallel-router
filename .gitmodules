@@ -1,0 +1,3 @@
+[submodule "pq_profiling/CPS"]
+	path = pq_profiling/CPS
+	url = https://github.com/mcj-group/CPS.git
