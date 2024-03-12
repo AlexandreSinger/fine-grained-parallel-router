@@ -65,20 +65,4 @@ public:
 };
 } // namespace utility
 
-#include "oneapi/tbb/task_arena.h"
-
-namespace utility {
-inline int get_default_num_threads() {
-    return oneapi::tbb::this_task_arena::max_concurrency();
-}
-} // namespace utility
-
-#include <iostream>
-namespace utility {
-inline void report_elapsed_time(double seconds) {
-    std::cout << "elapsed time : " << seconds << " seconds"
-              << "\n";
-}
-} // namespace utility
-
 #endif

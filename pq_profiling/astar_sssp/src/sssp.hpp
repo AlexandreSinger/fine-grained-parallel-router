@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <vector>
 #include <thread>
+#include <mutex>
 
 #include "graph.hpp"
 
@@ -92,7 +93,7 @@ class mq_parallel_sssp : public sssp {
         MultiQueueIO<Comparator<vertex_rec, std::greater<vertex_rec>>, path_cost, vertex_id>;
 
     MQ_IO *mq;
-    oneapi::tbb::spin_mutex *locks; // a lock for each vertex
+    std::mutex *locks; // a lock for each vertex
 
 public:
     mq_parallel_sssp(graph *g_ptr,
@@ -101,7 +102,7 @@ public:
                      size_t num_threads,
                      size_t num_queues)
             : sssp(g_ptr, src_id, dst_id, num_threads) {
-        locks = new oneapi::tbb::spin_mutex[g->get_num_vertices()];
+        locks = new std::mutex[g->get_num_vertices()];
         mq = new MQ_IO(num_queues, num_threads, 0 /*no need to use batches*/);
         mq->push(std::make_tuple(g->f_distance[src], src)); // emplace src
     }
@@ -123,12 +124,12 @@ class tbb_parallel_sssp : public sssp {
         }
     };
     oneapi::tbb::concurrent_priority_queue<vertex_rec, compare_f> open_set; // tentative vertices
-    oneapi::tbb::spin_mutex *locks; // a lock for each vertex
+    std::mutex *locks; // a lock for each vertex
 
 public:
     tbb_parallel_sssp(graph *g_ptr, vertex_id src_id, vertex_id dst_id, size_t num_threads)
             : sssp(g_ptr, src_id, dst_id, num_threads) {
-        locks = new oneapi::tbb::spin_mutex[g->get_num_vertices()];
+        locks = new std::mutex[g->get_num_vertices()];
         open_set.emplace(g->f_distance[src], src); // emplace src into open_set
     }
 

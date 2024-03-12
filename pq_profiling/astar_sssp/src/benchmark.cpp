@@ -5,7 +5,7 @@ const size_t N = 1000000;
 const unsigned src = 0;
 const unsigned dst = N - 1;
 
-const size_t num_test_runs = 32;
+const size_t num_test_runs = 8;
 
 inline double test_harness(std::function<sssp*()> factory, size_t num_runs) {
     long long t_accumulated_ms = 0;
@@ -23,6 +23,8 @@ inline double test_harness(std::function<sssp*()> factory, size_t num_runs) {
 }
 
 int main() {
+    setbuf(stdout, NULL);
+
     auto t_start = std::chrono::system_clock::now();
     graph g(N);
     auto t_graph_init_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -47,7 +49,7 @@ int main() {
         g.print_path(src, dst);
     };
 
-    for (size_t num_threads : { 1, 2, 4, 8, 16, 32 }) {
+    for (size_t num_threads : { 1, 2, 4, 8, 16 }) {
         tbb_test_harness(num_threads);
     }
 
@@ -62,10 +64,16 @@ int main() {
         g.print_path(src, dst);
     };
 
-    for (size_t num_threads : { 1, 2, 4, 8, 16, 32 }) {
-        for (size_t queues_per_thread : { 2, 4, 8, 16 }) {
-            mq_test_harness(num_threads, num_threads * queues_per_thread);
-        }
+    std::vector<std::pair<size_t, size_t>> test_vec = {
+        { 1, 2 }, //
+        { 2, 2 },  { 2, 4 },  { 2, 8 }, //
+        { 4, 2 },  { 4, 4 },  { 4, 8 },  { 4, 16 }, //
+        { 8, 2 },  { 8, 4 },  { 8, 8 },  { 8, 16 },  { 8, 32 }, //
+        { 16, 2 }, { 16, 4 }, { 16, 8 }, { 16, 16 }, { 16, 32 }, { 16, 64 }, //
+    };
+
+    for (auto x : test_vec) {
+        mq_test_harness(x.first, x.second);
     }
 
     return 0;

@@ -44,31 +44,25 @@ void mq_parallel_sssp::thread_func() {
 
         if (u == dst)
             continue;
-        double old_g_u = 0.0;
-        {
-            oneapi::tbb::spin_mutex::scoped_lock l(locks[u]);
-            if (f > g->f_distance[u])
-                continue; // prune search space
-            old_g_u = g->g_distance[u];
-        }
+        if (f > g->f_distance[u])
+            continue; // prune search space, relax restrictions on f_distance[u] synchronization
+
+        double old_g_u = g->g_distance[u];
         for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
             vertex_id v = g->edges[u][i];
             double new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
             double new_f_v = 0.0;
-            // the push flag lets us move some work out of the critical section below
-            bool push = false;
-            {
-                oneapi::tbb::spin_mutex::scoped_lock l(locks[v]);
-                if (new_g_v < g->g_distance[v]) {
-                    g->predecessor[v] = u;
-                    g->g_distance[v] = new_g_v;
-                    new_f_v = g->f_distance[v] =
-                        g->g_distance[v] + get_distance(g->vertices[v], g->vertices[dst]);
-                    push = true;
-                }
-            }
-            if (push) {
+            locks[v].lock();
+            if (new_g_v < g->g_distance[v]) {
+                g->predecessor[v] = u;
+                g->g_distance[v] = new_g_v;
+                new_f_v = g->f_distance[v] =
+                    g->g_distance[v] + get_distance(g->vertices[v], g->vertices[dst]);
+                locks[v].unlock();
                 mq->push(std::make_tuple(new_f_v, v));
+            }
+            else {
+                locks[v].unlock();
             }
         }
     }
@@ -83,31 +77,25 @@ void tbb_parallel_sssp::thread_func() {
 
         if (u == dst)
             continue;
-        double old_g_u = 0.0;
-        {
-            oneapi::tbb::spin_mutex::scoped_lock l(locks[u]);
-            if (f > g->f_distance[u])
-                continue; // prune search space
-            old_g_u = g->g_distance[u];
-        }
+        if (f > g->f_distance[u])
+            continue; // prune search space, relax restrictions on f_distance[u] synchronization
+
+        double old_g_u = g->g_distance[u];
         for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
             vertex_id v = g->edges[u][i];
             double new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
             double new_f_v = 0.0;
-            // the push flag lets us move some work out of the critical section below
-            bool push = false;
-            {
-                oneapi::tbb::spin_mutex::scoped_lock l(locks[v]);
-                if (new_g_v < g->g_distance[v]) {
-                    g->predecessor[v] = u;
-                    g->g_distance[v] = new_g_v;
-                    new_f_v = g->f_distance[v] =
-                        g->g_distance[v] + get_distance(g->vertices[v], g->vertices[dst]);
-                    push = true;
-                }
-            }
-            if (push) {
+            locks[v].lock();
+            if (new_g_v < g->g_distance[v]) {
+                g->predecessor[v] = u;
+                g->g_distance[v] = new_g_v;
+                new_f_v = g->f_distance[v] =
+                    g->g_distance[v] + get_distance(g->vertices[v], g->vertices[dst]);
+                locks[v].unlock();
                 open_set.push(std::make_pair(new_f_v, v));
+            }
+            else {
+                locks[v].unlock();
             }
         }
     }
