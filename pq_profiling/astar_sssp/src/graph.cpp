@@ -24,7 +24,8 @@ inline bool die_toss(std::size_t a, std::size_t b, utility::FastRandom& mr) {
 }
 
 void graph::trace_back(vertex_id src, vertex_id dst, std::vector<vertex_id>& path) {
-    vertex_id at = predecessor[dst];
+    vertex_id at = use_packed_predecessor_and_g_dist ? get_predecessor_from_pack(pre_g_dist[dst])
+                                                     : predecessor[dst];
     if (at == num_vertices)
         path.push_back(src);
     else if (at == src) {
@@ -40,13 +41,13 @@ void graph::trace_back(vertex_id src, vertex_id dst, std::vector<vertex_id>& pat
 void graph::print_path(vertex_id src, vertex_id dst) {
     std::vector<vertex_id> path;
     trace_back(src, dst, path);
-    double path_length = 0.0;
+    path_cost path_length = 0.0;
 #ifdef DEBUG
     printf("\n      ");
 #endif
     for (std::size_t i = 0; i < path.size(); ++i) {
         if (path[i] != dst) {
-            double seg_length = get_distance(vertices[path[i]], vertices[path[i + 1]]);
+            path_cost seg_length = get_distance(vertices[path[i]], vertices[path[i + 1]]);
 #ifdef DEBUG
             printf("%6.1f       ", seg_length);
 #endif
@@ -69,12 +70,6 @@ void graph::print_path(vertex_id src, vertex_id dst) {
 }
 
 void graph::init() {
-    vertices.resize(num_vertices);
-    edges.resize(num_vertices);
-    predecessor.resize(num_vertices);
-    g_distance.resize(num_vertices);
-    f_distance.resize(num_vertices);
-
     for (size_t r = 0; r < num_vertices; r += 64) {
         utility::FastRandom my_random(r);
         for (size_t i = r; i < std::min(r + 64, num_vertices); ++i) {
@@ -108,9 +103,11 @@ void graph::init() {
 }
 
 void graph::reset() {
+    uint64_t packed = pack_predecessor_g_dist(num_vertices, (float)INF);
     for (size_t i = 0; i < num_vertices; ++i) {
         f_distance[i] = g_distance[i] = INF;
         predecessor[i] = num_vertices;
+        pre_g_dist[i] = packed;
     }
 }
 

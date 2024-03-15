@@ -1,10 +1,6 @@
 #include "graph.hpp"
 #include "sssp.hpp"
 
-const size_t N = 1000000;
-const unsigned src = 0;
-const unsigned dst = N - 1;
-
 const size_t num_test_runs = 8;
 
 inline double test_harness(std::function<sssp*()> factory, size_t num_runs) {
@@ -22,7 +18,11 @@ inline double test_harness(std::function<sssp*()> factory, size_t num_runs) {
     return (double)t_accumulated_ms / num_runs;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    const size_t N = (argc == 1) ? 200000 : std::stoi(argv[1]);
+    const unsigned src = 0;
+    const unsigned dst = N - 1;
+
     setbuf(stdout, NULL);
 
     auto t_start = std::chrono::system_clock::now();
@@ -53,27 +53,51 @@ int main() {
         tbb_test_harness(num_threads);
     }
 
-    auto mq_test_harness = [&](size_t num_threads, size_t num_queues) {
+    auto mq_lock_test_harness = [&](size_t num_threads, size_t num_queues) {
         auto mq = [&] {
-            return new mq_parallel_sssp(&g, src, dst, num_threads, num_queues);
+            return new mq_parallel_sssp_lock(&g, src, dst, num_threads, num_queues);
         };
-        printf("[%6.3f ms] MultiQueue (%zu threads, %zu queues): ",
+        printf("[%6.3f ms] MQ (lock) (#T=%zu, #Q=%zu): ",
                test_harness(mq, num_test_runs),
                num_threads,
                num_queues);
         g.print_path(src, dst);
     };
 
-    std::vector<std::pair<size_t, size_t>> test_vec = {
-        { 1, 2 }, //
-        { 2, 2 },  { 2, 4 },  { 2, 8 }, //
-        { 4, 2 },  { 4, 4 },  { 4, 8 },  { 4, 16 }, //
-        { 8, 2 },  { 8, 4 },  { 8, 8 },  { 8, 16 },  { 8, 32 }, //
-        { 16, 2 }, { 16, 4 }, { 16, 8 }, { 16, 16 }, { 16, 32 }, { 16, 64 }, //
+    auto mq_ttas_test_harness = [&](size_t num_threads, size_t num_queues) {
+        auto mq = [&] {
+            return new mq_parallel_sssp_ttas(&g, src, dst, num_threads, num_queues);
+        };
+        printf("[%6.3f ms] MQ (TTAS) (#T=%zu, #Q=%zu): ",
+               test_harness(mq, num_test_runs),
+               num_threads,
+               num_queues);
+        g.print_path(src, dst);
     };
 
+    auto mq_um_test_harness = [&](size_t num_threads, size_t num_queues) {
+        auto mq = [&] {
+            return new mq_parallel_sssp_update_with_min(&g, src, dst, num_threads, num_queues);
+        };
+        printf("[%6.3f ms] MQ (update-min) (#T=%zu, #Q=%zu): ",
+               test_harness(mq, num_test_runs),
+               num_threads,
+               num_queues);
+        g.print_path(src, dst);
+    };
+
+    std::vector<std::pair<size_t, size_t>> test_vec = { { 1, 2 } };
+
+    for (size_t num_threads : { 2, 4, 8, 16 }) {
+        for (size_t num_queues : { 8, 16, 32, 64, 128 }) {
+            test_vec.push_back({ num_threads, num_queues });
+        }
+    }
+
     for (auto x : test_vec) {
-        mq_test_harness(x.first, x.second);
+        mq_lock_test_harness(x.first, x.second);
+        mq_ttas_test_harness(x.first, x.second);
+        mq_um_test_harness(x.first, x.second);
     }
 
     return 0;

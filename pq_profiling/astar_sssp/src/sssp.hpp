@@ -2,10 +2,12 @@
 #define _SSSP_HPP_
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <cstdint>
 
 #include "graph.hpp"
 
@@ -27,6 +29,8 @@ public:
         g->g_distance[src] = 0.0; // src's distance from src is zero
         g->f_distance[src] =
             get_distance(g->vertices[src], g->vertices[dst]); // estimate distance from src to dst
+        g->pre_g_dist[src] = 0.0; // src's distance from src is zero
+        g->use_packed_predecessor_and_g_dist = false;
     }
 
     void fork() {
@@ -78,7 +82,8 @@ public:
 
 #include "MultiQueueIO.h"
 
-class mq_parallel_sssp : public sssp {
+class mq_parallel_sssp_base : public sssp {
+protected:
     template <typename T = vertex_rec, class func = std::greater<T>>
     class Comparator {
         func f;
@@ -93,24 +98,74 @@ class mq_parallel_sssp : public sssp {
         MultiQueueIO<Comparator<vertex_rec, std::greater<vertex_rec>>, path_cost, vertex_id>;
 
     MQ_IO *mq;
-    std::mutex *locks; // a lock for each vertex
 
 public:
-    mq_parallel_sssp(graph *g_ptr,
-                     vertex_id src_id,
-                     vertex_id dst_id,
-                     size_t num_threads,
-                     size_t num_queues)
+    mq_parallel_sssp_base(graph *g_ptr,
+                          vertex_id src_id,
+                          vertex_id dst_id,
+                          size_t num_threads,
+                          size_t num_queues)
             : sssp(g_ptr, src_id, dst_id, num_threads) {
-        locks = new std::mutex[g->get_num_vertices()];
         mq = new MQ_IO(num_queues, num_threads, 0 /*no need to use batches*/);
-        mq->push(std::make_tuple(g->f_distance[src], src)); // emplace src
+        const path_cost f_dist_src = g->f_distance[src];
+        mq->push(std::make_tuple(f_dist_src, src)); // emplace src
     }
 
-    ~mq_parallel_sssp() {
+    virtual ~mq_parallel_sssp_base() {
         delete mq;
-        delete[] locks;
     }
+
+    virtual void thread_func() = 0;
+};
+
+class mq_parallel_sssp_lock : public mq_parallel_sssp_base {
+    std::vector<std::mutex> locks; // a lock for each vertex
+
+public:
+    mq_parallel_sssp_lock(graph *g_ptr,
+                          vertex_id src_id,
+                          vertex_id dst_id,
+                          size_t num_threads,
+                          size_t num_queues)
+            : mq_parallel_sssp_base(g_ptr, src_id, dst_id, num_threads, num_queues) {
+        locks = std::vector<std::mutex>(g->get_num_vertices());
+    }
+
+    ~mq_parallel_sssp_lock() {}
+
+    void thread_func();
+};
+
+class mq_parallel_sssp_ttas : public mq_parallel_sssp_base {
+    std::vector<std::atomic_flag> lock_flags;
+
+public:
+    mq_parallel_sssp_ttas(graph *g_ptr,
+                          vertex_id src_id,
+                          vertex_id dst_id,
+                          size_t num_threads,
+                          size_t num_queues)
+            : mq_parallel_sssp_base(g_ptr, src_id, dst_id, num_threads, num_queues) {
+        lock_flags = std::vector<std::atomic_flag>(g->get_num_vertices());
+    }
+
+    ~mq_parallel_sssp_ttas() {}
+
+    void thread_func();
+};
+
+class mq_parallel_sssp_update_with_min : public mq_parallel_sssp_base {
+public:
+    mq_parallel_sssp_update_with_min(graph *g_ptr,
+                                     vertex_id src_id,
+                                     vertex_id dst_id,
+                                     size_t num_threads,
+                                     size_t num_queues)
+            : mq_parallel_sssp_base(g_ptr, src_id, dst_id, num_threads, num_queues) {
+        g->use_packed_predecessor_and_g_dist = true;
+    }
+
+    ~mq_parallel_sssp_update_with_min() {}
 
     void thread_func();
 };
