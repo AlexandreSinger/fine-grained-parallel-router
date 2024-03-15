@@ -86,11 +86,11 @@ int main(int argc, char** argv) {
         g.print_path(src, dst);
     };
 
-    std::vector<std::pair<size_t, size_t>> test_vec = { { 1, 2 } };
+    std::vector<std::pair<size_t, size_t>> test_vec;
 
-    for (size_t num_threads : { 2, 4, 8, 16 }) {
-        for (size_t num_queues : { 8, 16, 32, 64, 128 }) {
-            test_vec.push_back({ num_threads, num_queues });
+    for (size_t num_threads : { 1, 2, 4, 8, 16 }) {
+        for (size_t num_queues_per_thread : { 2, 4, 8, 16, 32 }) {
+            test_vec.push_back({ num_threads, num_queues_per_thread * num_threads });
         }
     }
 

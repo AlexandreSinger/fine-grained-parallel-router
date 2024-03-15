@@ -17,6 +17,24 @@ protected:
     vertex_id src, dst;
     std::vector<std::thread> pool;
     bool *thread_stop;
+    bool early_exit;
+
+    int dummyCalculation(int num) {
+#ifndef DISABLE_DUMMY_CALC
+        if (num > 0) {
+            float x = 1.0;
+            for (int i = -1000; i < 1000; ++i) {
+                x *= (float)(std::abs(x) + x);
+            }
+            return x != 1.0;
+        }
+        else {
+            return 1;
+        }
+#else
+        return 1;
+#endif
+    }
 
 public:
     sssp(graph *graph_ptr, vertex_id src_id, vertex_id dst_id, size_t num_threads) {
@@ -36,6 +54,7 @@ public:
     void fork() {
         const size_t num_threads = pool.size();
         std::fill(thread_stop, thread_stop + num_threads, false);
+        early_exit = false;
         for (int i = 0; i < num_threads; ++i) {
             pool[i] = std::thread([this, i, num_threads] {
                 bool pool_stop;
@@ -171,6 +190,7 @@ public:
 };
 
 #include "oneapi/tbb/concurrent_priority_queue.h"
+#include "oneapi/tbb/spin_mutex.h"
 
 class tbb_parallel_sssp : public sssp {
     struct compare_f {
@@ -179,12 +199,12 @@ class tbb_parallel_sssp : public sssp {
         }
     };
     oneapi::tbb::concurrent_priority_queue<vertex_rec, compare_f> open_set; // tentative vertices
-    std::mutex *locks; // a lock for each vertex
+    oneapi::tbb::spin_mutex *locks; // a lock for each vertex
 
 public:
     tbb_parallel_sssp(graph *g_ptr, vertex_id src_id, vertex_id dst_id, size_t num_threads)
             : sssp(g_ptr, src_id, dst_id, num_threads) {
-        locks = new std::mutex[g->get_num_vertices()];
+        locks = new oneapi::tbb::spin_mutex[g->get_num_vertices()];
         open_set.emplace(g->f_distance[src], src); // emplace src into open_set
     }
 

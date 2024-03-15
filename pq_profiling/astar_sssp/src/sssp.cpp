@@ -6,32 +6,33 @@ void stl_sequential_sssp::thread_func() {
         path_cost f;
         std::tie(f, u) = pq.top();
         pq.pop();
+
         if (u == dst)
-            continue;
-        path_cost old_g_u = 0.0;
+            break;
 
         if (f > g->f_distance[u])
             continue; // prune search space
-        old_g_u = g->g_distance[u];
+        path_cost old_g_u = g->g_distance[u];
+
+        old_g_u *= dummyCalculation(u);
 
         for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
             vertex_id v = g->edges[u][i];
             path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
-            path_cost new_f_v = 0.0;
 
             if (new_g_v < g->g_distance[v]) {
                 g->predecessor[v] = u;
                 g->g_distance[v] = new_g_v;
-                new_f_v = g->f_distance[v] =
-                    g->g_distance[v] + get_distance(g->vertices[v], g->vertices[dst]);
-                pq.push(std::make_pair(new_f_v, v));
+                path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
+                g->f_distance[v] = new_f_v;
+                pq.push({ new_f_v, v });
             }
         }
     }
 }
 
 void mq_parallel_sssp_lock::thread_func() {
-    while (true) {
+    while (!early_exit) {
         vertex_id u;
         path_cost f;
 
@@ -42,24 +43,28 @@ void mq_parallel_sssp_lock::thread_func() {
         else
             break;
 
-        if (u == dst)
-            continue;
+        if (u == dst) {
+            early_exit = true;
+            break;
+        }
+
         if (f > g->f_distance[u])
             continue; // prune search space
 
         path_cost old_g_u = g->g_distance[u];
+        old_g_u *= dummyCalculation(u);
+
         for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
             vertex_id v = g->edges[u][i];
             path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
-            path_cost new_f_v = 0.0;
+            path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
             locks[v].lock();
             if (new_g_v < g->g_distance[v]) {
                 g->predecessor[v] = u;
                 g->g_distance[v] = new_g_v;
-                new_f_v = g->f_distance[v] =
-                    g->g_distance[v] + get_distance(g->vertices[v], g->vertices[dst]);
+                g->f_distance[v] = new_f_v;
                 locks[v].unlock();
-                mq->push(std::make_tuple(new_f_v, v));
+                mq->push({ new_f_v, v });
             }
             else {
                 locks[v].unlock();
@@ -69,7 +74,7 @@ void mq_parallel_sssp_lock::thread_func() {
 }
 
 void mq_parallel_sssp_ttas::thread_func() {
-    while (true) {
+    while (!early_exit) {
         vertex_id u;
         path_cost f;
 
@@ -80,21 +85,25 @@ void mq_parallel_sssp_ttas::thread_func() {
         else
             break;
 
-        if (u == dst)
-            continue;
+        if (u == dst) {
+            early_exit = true;
+            break;
+        }
+
         if (f > g->f_distance[u])
             continue; // prune search space
-
         path_cost old_g_u = g->g_distance[u];
+        old_g_u *= dummyCalculation(u);
+
         for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
             vertex_id v = g->edges[u][i];
             path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
+            path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
             if (new_g_v < g->g_distance[v]) {
-                path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
                 bool need_push = false;
                 while (std::atomic_flag_test_and_set_explicit(&lock_flags[v],
                                                               std::memory_order_acquire))
-                    ;
+                    _mm_pause();
                 if (new_g_v < g->g_distance[v]) {
                     g->predecessor[v] = u;
                     g->g_distance[v] = new_g_v;
@@ -103,14 +112,14 @@ void mq_parallel_sssp_ttas::thread_func() {
                 }
                 std::atomic_flag_clear_explicit(&lock_flags[v], std::memory_order_release);
                 if (need_push)
-                    mq->push(std::make_tuple(new_f_v, v));
+                    mq->push({ new_f_v, v });
             }
         }
     }
 }
 
 void mq_parallel_sssp_update_with_min::thread_func() {
-    while (true) {
+    while (!early_exit) {
         vertex_id u;
         path_cost f;
 
@@ -121,13 +130,17 @@ void mq_parallel_sssp_update_with_min::thread_func() {
         else
             break;
 
-        if (u == dst)
-            continue;
+        if (u == dst) {
+            early_exit = true;
+            break;
+        }
 
         uint64_t old_pack_u = g->pre_g_dist[u].load(std::memory_order_relaxed);
         path_cost old_g_u = get_g_dist_from_pack(old_pack_u);
         if (f > old_g_u + get_distance(g->vertices[u], g->vertices[dst]))
             continue; // prune search space
+
+        old_g_u *= dummyCalculation(u);
 
         for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
             vertex_id v = g->edges[u][i];
@@ -156,25 +169,33 @@ void tbb_parallel_sssp::thread_func() {
 
         if (u == dst)
             continue;
-        if (f > g->f_distance[u])
-            continue; // prune search space
 
-        path_cost old_g_u = g->g_distance[u];
+        path_cost old_g_u;
+        {
+            oneapi::tbb::spin_mutex::scoped_lock l(locks[u]);
+            if (f > g->f_distance[u])
+                continue; // prune search space
+            old_g_u = g->g_distance[u];
+        }
+
+        old_g_u *= dummyCalculation(u);
+
         for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
             vertex_id v = g->edges[u][i];
             path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
-            path_cost new_f_v = 0.0;
-            locks[v].lock();
-            if (new_g_v < g->g_distance[v]) {
-                g->predecessor[v] = u;
-                g->g_distance[v] = new_g_v;
-                new_f_v = g->f_distance[v] =
-                    g->g_distance[v] + get_distance(g->vertices[v], g->vertices[dst]);
-                locks[v].unlock();
-                open_set.push(std::make_pair(new_f_v, v));
+            path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
+            bool push = false;
+            {
+                oneapi::tbb::spin_mutex::scoped_lock l(locks[v]);
+                if (new_g_v < g->g_distance[v]) {
+                    g->predecessor[v] = u;
+                    g->g_distance[v] = new_g_v;
+                    g->f_distance[v] = new_f_v;
+                    push = true;
+                }
             }
-            else {
-                locks[v].unlock();
+            if (push) {
+                open_set.push({ new_f_v, v });
             }
         }
     }
