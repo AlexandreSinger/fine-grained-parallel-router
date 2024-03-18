@@ -23,7 +23,7 @@ protected:
 #ifndef DISABLE_DUMMY_CALC
         if (num > 0) {
             float x = 1.0;
-            for (int i = -1000; i < 1000; ++i) {
+            for (int i = -250; i < 250; ++i) {
                 x *= (float)(std::abs(x) + x);
             }
             return x != 1.0;

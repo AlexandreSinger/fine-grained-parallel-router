@@ -74,7 +74,7 @@ void mq_parallel_sssp_lock::thread_func() {
 }
 
 void mq_parallel_sssp_ttas::thread_func() {
-    while (!early_exit) {
+    while (true) {
         vertex_id u;
         path_cost f;
 
@@ -85,14 +85,13 @@ void mq_parallel_sssp_ttas::thread_func() {
         else
             break;
 
-        if (u == dst) {
-            early_exit = true;
-            break;
-        }
+        if (u == dst)
+            continue;
 
         if (f > g->f_distance[u])
             continue; // prune search space
         path_cost old_g_u = g->g_distance[u];
+
         old_g_u *= dummyCalculation(u);
 
         for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
@@ -119,7 +118,7 @@ void mq_parallel_sssp_ttas::thread_func() {
 }
 
 void mq_parallel_sssp_update_with_min::thread_func() {
-    while (!early_exit) {
+    while (true) {
         vertex_id u;
         path_cost f;
 
@@ -130,10 +129,8 @@ void mq_parallel_sssp_update_with_min::thread_func() {
         else
             break;
 
-        if (u == dst) {
-            early_exit = true;
-            break;
-        }
+        if (u == dst)
+            continue;
 
         uint64_t old_pack_u = g->pre_g_dist[u].load(std::memory_order_relaxed);
         path_cost old_g_u = get_g_dist_from_pack(old_pack_u);
