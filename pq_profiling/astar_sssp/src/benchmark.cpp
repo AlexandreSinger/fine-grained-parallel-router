@@ -1,6 +1,8 @@
 #include "graph.hpp"
 #include "sssp.hpp"
 
+#include <functional>
+
 const size_t num_test_runs = 8;
 
 inline double test_harness(std::function<sssp*()> factory, size_t num_runs) {
@@ -53,22 +55,22 @@ int main(int argc, char** argv) {
         tbb_test_harness(num_threads);
     }
 
-    auto mq_lock_test_harness = [&](size_t num_threads, size_t num_queues) {
+    auto mq_mtx_test_harness = [&](size_t num_threads, size_t num_queues) {
         auto mq = [&] {
-            return new mq_parallel_sssp_lock(&g, src, dst, num_threads, num_queues);
+            return new mq_parallel_sssp_mtx(&g, src, dst, num_threads, num_queues);
         };
-        printf("[%6.3f ms] MQ (lock) (#T=%zu, #Q=%zu): ",
+        printf("[%6.3f ms] MQ (mutex) (#T=%zu, #Q=%zu): ",
                test_harness(mq, num_test_runs),
                num_threads,
                num_queues);
         g.print_path(src, dst);
     };
 
-    auto mq_ttas_test_harness = [&](size_t num_threads, size_t num_queues) {
+    auto mq_spin_test_harness = [&](size_t num_threads, size_t num_queues) {
         auto mq = [&] {
-            return new mq_parallel_sssp_ttas(&g, src, dst, num_threads, num_queues);
+            return new mq_parallel_sssp_spin(&g, src, dst, num_threads, num_queues);
         };
-        printf("[%6.3f ms] MQ (TTAS) (#T=%zu, #Q=%zu): ",
+        printf("[%6.3f ms] MQ (TAS) (#T=%zu, #Q=%zu): ",
                test_harness(mq, num_test_runs),
                num_threads,
                num_queues);
@@ -95,8 +97,8 @@ int main(int argc, char** argv) {
     }
 
     for (auto x : test_vec) {
-        mq_lock_test_harness(x.first, x.second);
-        mq_ttas_test_harness(x.first, x.second);
+        mq_mtx_test_harness(x.first, x.second);
+        mq_spin_test_harness(x.first, x.second);
         mq_um_test_harness(x.first, x.second);
     }
 

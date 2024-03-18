@@ -24,15 +24,15 @@ inline bool die_toss(std::size_t a, std::size_t b, utility::FastRandom& mr) {
 }
 
 void graph::trace_back(vertex_id src, vertex_id dst, std::vector<vertex_id>& path) {
-    vertex_id at = use_packed_predecessor_and_g_dist ? get_predecessor_from_pack(pre_g_dist[dst])
-                                                     : predecessor[dst];
-    if (at == num_vertices)
+    vertex_id at = use_packed_predecessor_and_best_total_cost
+                       ? get_predecessor_from_pack(packed_predecessor_and_best_total_cost[dst])
+                       : predecessor[dst];
+    if (at == num_vertices) {
         path.push_back(src);
-    else if (at == src) {
+    } else if (at == src) {
         path.push_back(src);
         path.push_back(dst);
-    }
-    else {
+    } else {
         trace_back(src, at, path);
         path.push_back(dst);
     }
@@ -105,9 +105,9 @@ void graph::init() {
 void graph::reset() {
     uint64_t packed = pack_predecessor_g_dist(num_vertices, (float)INF);
     for (size_t i = 0; i < num_vertices; ++i) {
-        f_distance[i] = g_distance[i] = INF;
+        best_total_cost[i] = INF;
         predecessor[i] = num_vertices;
-        pre_g_dist[i] = packed;
+        packed_predecessor_and_best_total_cost[i] = packed;
     }
 }
 

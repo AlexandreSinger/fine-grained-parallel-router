@@ -1,199 +1,261 @@
 #include "sssp.hpp"
 
 void stl_sequential_sssp::thread_func() {
+    const point _dst = g->vertices[dst];
     while (!pq.empty()) {
-        vertex_id u;
-        path_cost f;
-        std::tie(f, u) = pq.top();
+        // pop
+        const auto cheapest = std::get<1>(pq.top());
+        const auto node = cheapest.id;
+        const point _node = g->vertices[node];
         pq.pop();
 
-        if (u == dst)
-            break;
-
-        if (f > g->f_distance[u])
-            continue; // prune search space
-        path_cost old_g_u = g->g_distance[u];
-
-        old_g_u *= dummyCalculation(u);
-
-        for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
-            vertex_id v = g->edges[u][i];
-            path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
-
-            if (new_g_v < g->g_distance[v]) {
-                g->predecessor[v] = u;
-                g->g_distance[v] = new_g_v;
-                path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
-                g->f_distance[v] = new_f_v;
-                pq.push({ new_f_v, v });
-            }
-        }
-    }
-}
-
-void mq_parallel_sssp_lock::thread_func() {
-    while (!early_exit) {
-        vertex_id u;
-        path_cost f;
-
-        auto u_rec = mq->tryPop();
-        if (u_rec) {
-            std::tie(f, u) = u_rec.get(); // try pop succeed
-        }
-        else
-            break;
-
-        if (u == dst) {
-            early_exit = true;
+        // kill time (per pop)
+        if (dummyCalculation(node) != 1) {
             break;
         }
 
-        if (f > g->f_distance[u])
-            continue; // prune search space
-
-        path_cost old_g_u = g->g_distance[u];
-        old_g_u *= dummyCalculation(u);
-
-        for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
-            vertex_id v = g->edges[u][i];
-            path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
-            path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
-            locks[v].lock();
-            if (new_g_v < g->g_distance[v]) {
-                g->predecessor[v] = u;
-                g->g_distance[v] = new_g_v;
-                g->f_distance[v] = new_f_v;
-                locks[v].unlock();
-                mq->push({ new_f_v, v });
-            }
-            else {
-                locks[v].unlock();
-            }
-        }
-    }
-}
-
-void mq_parallel_sssp_ttas::thread_func() {
-    while (true) {
-        vertex_id u;
-        path_cost f;
-
-        auto u_rec = mq->tryPop();
-        if (u_rec) {
-            std::tie(f, u) = u_rec.get(); // try pop succeed
-        }
-        else
-            break;
-
-        if (u == dst)
+        // prune
+        if (g->best_total_cost[node] <= cheapest.total_cost) {
             continue;
-
-        if (f > g->f_distance[u])
-            continue; // prune search space
-        path_cost old_g_u = g->g_distance[u];
-
-        old_g_u *= dummyCalculation(u);
-
-        for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
-            vertex_id v = g->edges[u][i];
-            path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
-            path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
-            if (new_g_v < g->g_distance[v]) {
-                bool need_push = false;
-                while (std::atomic_flag_test_and_set_explicit(&lock_flags[v],
-                                                              std::memory_order_acquire))
-                    _mm_pause();
-                if (new_g_v < g->g_distance[v]) {
-                    g->predecessor[v] = u;
-                    g->g_distance[v] = new_g_v;
-                    g->f_distance[v] = new_f_v;
-                    need_push = true;
-                }
-                std::atomic_flag_clear_explicit(&lock_flags[v], std::memory_order_release);
-                if (need_push)
-                    mq->push({ new_f_v, v });
-            }
         }
-    }
-}
 
-void mq_parallel_sssp_update_with_min::thread_func() {
-    while (true) {
-        vertex_id u;
-        path_cost f;
+        // update
+        g->best_total_cost[node] = cheapest.total_cost;
+        g->predecessor[node] = cheapest.pre;
 
-        auto u_rec = mq->tryPop();
-        if (u_rec) {
-            std::tie(f, u) = u_rec.get(); // try pop succeed
-        }
-        else
+        // exit
+        if (node == dst) {
             break;
+        }
 
-        if (u == dst)
-            continue;
-
-        uint64_t old_pack_u = g->pre_g_dist[u].load(std::memory_order_relaxed);
-        path_cost old_g_u = get_g_dist_from_pack(old_pack_u);
-        if (f > old_g_u + get_distance(g->vertices[u], g->vertices[dst]))
-            continue; // prune search space
-
-        old_g_u *= dummyCalculation(u);
-
-        for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
-            vertex_id v = g->edges[u][i];
-            path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
-            path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
-
-            uint64_t old_pack_v = g->pre_g_dist[v].load(std::memory_order_relaxed);
-            uint64_t new_pack_v = pack_predecessor_g_dist(u, new_g_v);
-
-            while (new_g_v < get_g_dist_from_pack(old_pack_v)) {
-                if (g->pre_g_dist[v].compare_exchange_weak(old_pack_v, new_pack_v)) {
-                    mq->push(std::make_tuple(new_f_v, v));
-                    break;
-                }
-            }
+        // expand
+        for (const vertex_id neighbor : g->edges[node]) {
+            const point _neighbor = g->vertices[neighbor];
+            const path_cost neighbor_total_cost =
+                cheapest.total_cost + get_distance(_node, _neighbor);
+            const path_cost neighbor_h_cost = heuristic_cost(_neighbor, _dst);
+            pq.push(
+                { neighbor_total_cost + neighbor_h_cost, { neighbor, node, neighbor_total_cost } });
         }
     }
 }
 
 void tbb_parallel_sssp::thread_func() {
-    vertex_rec u_rec;
-    while (open_set.try_pop(u_rec)) {
-        vertex_id u;
-        path_cost f;
-        std::tie(f, u) = (u_rec);
+    const point _dst = g->vertices[dst];
+    pq_node_t pq_top;
+    while (pq.try_pop(pq_top)) {
+        // pop
+        const auto cheapest = std::get<1>(pq_top);
+        const auto node = cheapest.id;
+        const point _node = g->vertices[node];
 
-        if (u == dst)
-            continue;
-
-        path_cost old_g_u;
-        {
-            oneapi::tbb::spin_mutex::scoped_lock l(locks[u]);
-            if (f > g->f_distance[u])
-                continue; // prune search space
-            old_g_u = g->g_distance[u];
+        // kill time (per pop)
+        if (dummyCalculation(node) != 1) {
+            break;
         }
 
-        old_g_u *= dummyCalculation(u);
+        // prune
+        if (g->best_total_cost[node] <= cheapest.total_cost) {
+            continue;
+        }
+        if (g->best_total_cost[dst] <= cheapest.total_cost) {
+            continue;
+        }
 
-        for (std::size_t i = 0; i < g->edges[u].size(); ++i) {
-            vertex_id v = g->edges[u][i];
-            path_cost new_g_v = old_g_u + get_distance(g->vertices[u], g->vertices[v]);
-            path_cost new_f_v = new_g_v + get_distance(g->vertices[v], g->vertices[dst]);
-            bool push = false;
-            {
-                oneapi::tbb::spin_mutex::scoped_lock l(locks[v]);
-                if (new_g_v < g->g_distance[v]) {
-                    g->predecessor[v] = u;
-                    g->g_distance[v] = new_g_v;
-                    g->f_distance[v] = new_f_v;
-                    push = true;
-                }
+        locks[node].lock();
+        // prune
+        if (g->best_total_cost[node] <= /*non-deterministic currently*/ cheapest.total_cost) {
+            locks[node].unlock();
+            continue;
+        }
+        // update
+        g->best_total_cost[node] = cheapest.total_cost;
+        g->predecessor[node] = cheapest.pre;
+        locks[node].unlock();
+
+        // exit
+        if (node == dst) {
+            break;
+        }
+
+        // expand
+        for (const vertex_id neighbor : g->edges[node]) {
+            const point _neighbor = g->vertices[neighbor];
+            const path_cost neighbor_total_cost =
+                cheapest.total_cost + get_distance(_node, _neighbor);
+            const path_cost neighbor_h_cost = heuristic_cost(_neighbor, _dst);
+            pq.push(
+                { neighbor_total_cost + neighbor_h_cost, { neighbor, node, neighbor_total_cost } });
+        }
+    }
+}
+
+void mq_parallel_sssp_mtx::thread_func() {
+    const point _dst = g->vertices[dst];
+    while (true) {
+        // pop
+        auto pq_top = pq->tryPop();
+        if (!pq_top) {
+            break;
+        }
+        const auto cheapest = std::get<1>(pq_top.get());
+        const auto node = cheapest.id;
+        const point _node = g->vertices[node];
+
+        // kill time (per pop)
+        if (dummyCalculation(node) != 1) {
+            break;
+        }
+
+        // prune
+        if (g->best_total_cost[node] <= cheapest.total_cost) {
+            continue;
+        }
+        if (g->best_total_cost[dst] <= cheapest.total_cost) {
+            continue;
+        }
+
+        locks[node].lock();
+        // prune
+        if (g->best_total_cost[node] <= /*non-deterministic currently*/ cheapest.total_cost) {
+            locks[node].unlock();
+            continue;
+        }
+        // update
+        g->best_total_cost[node] = cheapest.total_cost;
+        g->predecessor[node] = cheapest.pre;
+        locks[node].unlock();
+
+        // prune, no need to expand the dst node
+        if (node == dst) {
+            continue;
+        }
+
+        // expand
+        for (const vertex_id neighbor : g->edges[node]) {
+            const point _neighbor = g->vertices[neighbor];
+            const path_cost neighbor_total_cost =
+                cheapest.total_cost + get_distance(_node, _neighbor);
+            const path_cost neighbor_h_cost = heuristic_cost(_neighbor, _dst);
+            pq->push(
+                { neighbor_total_cost + neighbor_h_cost, { neighbor, node, neighbor_total_cost } });
+        }
+    }
+}
+
+void mq_parallel_sssp_spin::thread_func() {
+    const point _dst = g->vertices[dst];
+    while (true) {
+        // pop
+        auto pq_top = pq->tryPop();
+        if (!pq_top) {
+            break;
+        }
+        const auto cheapest = std::get<1>(pq_top.get());
+        const auto node = cheapest.id;
+        const point _node = g->vertices[node];
+
+        // kill time (per pop)
+        if (dummyCalculation(node) != 1) {
+            break;
+        }
+
+        // prune
+        if (g->best_total_cost[node] <= cheapest.total_cost) {
+            continue;
+        }
+        if (g->best_total_cost[dst] <= cheapest.total_cost) {
+            continue;
+        }
+
+        while (std::atomic_flag_test_and_set_explicit(&lock_flags[node], std::memory_order_acquire))
+            _mm_pause();
+        // prune
+        if (g->best_total_cost[node] <= /*non-deterministic currently*/ cheapest.total_cost) {
+            std::atomic_flag_clear_explicit(&lock_flags[node], std::memory_order_release);
+            continue;
+        }
+        // update
+        g->best_total_cost[node] = cheapest.total_cost;
+        g->predecessor[node] = cheapest.pre;
+        std::atomic_flag_clear_explicit(&lock_flags[node], std::memory_order_release);
+
+        // prune, no need to expand the dst node
+        if (node == dst) {
+            continue;
+        }
+
+        // expand
+        for (const vertex_id neighbor : g->edges[node]) {
+            const point _neighbor = g->vertices[neighbor];
+            const path_cost neighbor_total_cost =
+                cheapest.total_cost + get_distance(_node, _neighbor);
+            const path_cost neighbor_h_cost = heuristic_cost(_neighbor, _dst);
+            pq->push(
+                { neighbor_total_cost + neighbor_h_cost, { neighbor, node, neighbor_total_cost } });
+        }
+    }
+}
+
+void mq_parallel_sssp_update_with_min::thread_func() {
+    const point _dst = g->vertices[dst];
+    while (true) {
+        // pop
+        auto pq_top = pq->tryPop();
+        if (!pq_top) {
+            break;
+        }
+        const auto cheapest = std::get<1>(pq_top.get());
+        const auto node = cheapest.id;
+        const point _node = g->vertices[node];
+
+        // kill time (per pop)
+        if (dummyCalculation(node) != 1) {
+            break;
+        }
+
+        uint64_t node_pack =
+            g->packed_predecessor_and_best_total_cost[node].load(std::memory_order_relaxed);
+        uint64_t dst_pack =
+            g->packed_predecessor_and_best_total_cost[dst].load(std::memory_order_relaxed);
+        path_cost node_best_total_cost = get_g_dist_from_pack(node_pack);
+        path_cost dst_best_total_cost = get_g_dist_from_pack(dst_pack);
+
+        // prune
+        if (node_best_total_cost <= cheapest.total_cost) {
+            continue;
+        }
+        if (dst_best_total_cost <= cheapest.total_cost) {
+            continue;
+        }
+
+        // update
+        uint64_t updated_pack = pack_predecessor_g_dist(cheapest.pre, cheapest.total_cost);
+        bool updated = false;
+        while (cheapest.total_cost < get_g_dist_from_pack(node_pack)) {
+            if (g->packed_predecessor_and_best_total_cost[node].compare_exchange_weak(
+                    node_pack, updated_pack)) {
+                updated = true;
+                break;
             }
-            if (push) {
-                open_set.push({ new_f_v, v });
-            }
+        }
+        if (!updated) {
+            continue;
+        }
+
+        // prune, no need to expand the dst node
+        if (node == dst) {
+            continue;
+        }
+
+        // expand
+        for (const vertex_id neighbor : g->edges[node]) {
+            const point _neighbor = g->vertices[neighbor];
+            const path_cost neighbor_total_cost =
+                cheapest.total_cost + get_distance(_node, _neighbor);
+            const path_cost neighbor_h_cost = heuristic_cost(_neighbor, _dst);
+            pq->push(
+                { neighbor_total_cost + neighbor_h_cost, { neighbor, node, neighbor_total_cost } });
         }
     }
 }

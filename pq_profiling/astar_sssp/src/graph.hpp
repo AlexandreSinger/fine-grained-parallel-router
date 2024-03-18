@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 #include <iostream>
 #include <algorithm>
@@ -17,13 +18,12 @@ struct point {
     point(const point& p) : x(p.x), y(p.y) {}
 };
 
-typedef std::vector<point> point_set;
 typedef std::size_t vertex_id;
 typedef float path_cost;
-typedef std::tuple<path_cost, vertex_id> vertex_rec;
+typedef std::vector<point> point_set;
 typedef std::vector<std::vector<vertex_id>> edge_set;
 
-const path_cost INF = 1000000.0; // infinity
+const path_cost INF = std::numeric_limits<path_cost>::max(); // infinity
 
 inline path_cost get_distance(const point& p1, const point& p2) {
     path_cost xdiff = p1.x - p2.x, ydiff = p1.y - p2.y;
@@ -35,11 +35,10 @@ public:
     point_set vertices; // vertices
     edge_set edges; // edges
     vertex_id* predecessor; // for recreating path from src to dst
-    path_cost* f_distance; // estimated distances at particular vertex
-    path_cost* g_distance; // current shortest distances from src vertex
+    path_cost* best_total_cost; // current shortest distances from src vertex
 
-    bool use_packed_predecessor_and_g_dist;
-    std::atomic_uint64_t* pre_g_dist;
+    bool use_packed_predecessor_and_best_total_cost;
+    std::atomic_uint64_t* packed_predecessor_and_best_total_cost;
 
     graph(size_t num_vertices) {
         this->num_vertices = num_vertices;
@@ -47,19 +46,16 @@ public:
         edges.resize(num_vertices);
 
         predecessor = new vertex_id[num_vertices];
-        g_distance = new path_cost[num_vertices];
-        f_distance = new path_cost[num_vertices];
-
-        pre_g_dist = new std::atomic_uint64_t[num_vertices];
+        best_total_cost = new path_cost[num_vertices];
+        packed_predecessor_and_best_total_cost = new std::atomic_uint64_t[num_vertices];
 
         init();
     }
 
     ~graph() {
         delete[] predecessor;
-        delete[] f_distance;
-        delete[] g_distance;
-        delete[] pre_g_dist;
+        delete[] best_total_cost;
+        delete[] packed_predecessor_and_best_total_cost;
     }
 
     void trace_back(vertex_id src, vertex_id dst, std::vector<vertex_id>& path);

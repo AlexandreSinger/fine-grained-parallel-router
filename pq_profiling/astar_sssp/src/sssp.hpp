@@ -13,11 +13,30 @@
 
 class sssp {
 protected:
+    struct pq_node_tag_t {
+        vertex_id id;
+        vertex_id pre;
+        path_cost total_cost;
+        pq_node_tag_t() {}
+        pq_node_tag_t(int dont_care) {}
+        pq_node_tag_t(vertex_id id, vertex_id pre, path_cost total_cost)
+                : id(id),
+                  pre(pre),
+                  total_cost(total_cost) {}
+    };
+    using pq_node_t = std::tuple<path_cost /*priority*/, pq_node_tag_t>;
+    struct pq_compare {
+        bool operator()(const pq_node_t &u, const pq_node_t &v) {
+            return std::get<0>(u) > std::get<0>(v);
+        }
+    };
+
     graph *g;
     vertex_id src, dst;
+    path_cost src_to_dist_heuristic_cost;
+
     std::vector<std::thread> pool;
     bool *thread_stop;
-    bool early_exit;
 
     int dummyCalculation(int num) {
 #ifndef DISABLE_DUMMY_CALC
@@ -27,13 +46,16 @@ protected:
                 x *= (float)(std::abs(x) + x);
             }
             return x != 1.0;
-        }
-        else {
+        } else {
             return 1;
         }
 #else
         return 1;
 #endif
+    }
+
+    path_cost heuristic_cost(const point &p1, const point &p2) {
+        return get_distance(p1, p2);
     }
 
 public:
@@ -44,17 +66,13 @@ public:
         dst = dst_id;
         g = graph_ptr;
         g->reset();
-        g->g_distance[src] = 0.0; // src's distance from src is zero
-        g->f_distance[src] =
-            get_distance(g->vertices[src], g->vertices[dst]); // estimate distance from src to dst
-        g->pre_g_dist[src] = 0.0; // src's distance from src is zero
-        g->use_packed_predecessor_and_g_dist = false;
+        src_to_dist_heuristic_cost = heuristic_cost(g->vertices[src], g->vertices[dst]);
+        g->use_packed_predecessor_and_best_total_cost = false;
     }
 
     void fork() {
         const size_t num_threads = pool.size();
         std::fill(thread_stop, thread_stop + num_threads, false);
-        early_exit = false;
         for (int i = 0; i < num_threads; ++i) {
             pool[i] = std::thread([this, i, num_threads] {
                 bool pool_stop;
@@ -81,42 +99,63 @@ public:
 
     virtual void thread_func() = 0;
 
-    virtual ~sssp() {}
+    virtual ~sssp() {
+        delete[] thread_stop;
+    }
 };
 
-#include <queue>
+//
+// C++ STL
+//
 
+#include <queue>
 class stl_sequential_sssp : public sssp {
-    std::priority_queue<vertex_rec, std::vector<vertex_rec>, std::greater<vertex_rec>>
-        pq; // tentative vertices
+    std::priority_queue<pq_node_t, std::vector<pq_node_t>, pq_compare> pq; // tentative vertices
 
 public:
     stl_sequential_sssp(graph *g_ptr, vertex_id src_id, vertex_id dst_id)
             : sssp(g_ptr, src_id, dst_id, 1) {
-        pq.emplace(g->f_distance[src], src); // emplace src
+        pq.push({ src_to_dist_heuristic_cost, { src, g->get_num_vertices() /*pre*/, 0 } });
     }
 
     void thread_func();
 };
 
+//
+// OneTBB
+//
+
+#include "oneapi/tbb/concurrent_priority_queue.h"
+#include "oneapi/tbb/spin_mutex.h"
+
+class tbb_parallel_sssp : public sssp {
+    oneapi::tbb::concurrent_priority_queue<pq_node_t, pq_compare> pq; // tentative vertices
+    oneapi::tbb::spin_mutex *locks; // a lock for each vertex
+
+public:
+    tbb_parallel_sssp(graph *g_ptr, vertex_id src_id, vertex_id dst_id, size_t num_threads)
+            : sssp(g_ptr, src_id, dst_id, num_threads) {
+        locks = new oneapi::tbb::spin_mutex[g->get_num_vertices()];
+        pq.push({ src_to_dist_heuristic_cost, { src, g->get_num_vertices() /*pre*/, 0 } });
+    }
+
+    ~tbb_parallel_sssp() {
+        delete[] locks;
+    }
+
+    void thread_func();
+};
+
+//
+// Multi-Queue (MQ)
+//
+
 #include "MultiQueueIO.h"
 
 class mq_parallel_sssp_base : public sssp {
 protected:
-    template <typename T = vertex_rec, class func = std::greater<T>>
-    class Comparator {
-        func f;
-
-    public:
-        bool operator()(T a, T b) {
-            return func()(a, b);
-        }
-    };
-
-    using MQ_IO =
-        MultiQueueIO<Comparator<vertex_rec, std::greater<vertex_rec>>, path_cost, vertex_id>;
-
-    MQ_IO *mq;
+    using MQ_IO = MultiQueueIO<pq_compare, path_cost, pq_node_tag_t>;
+    MQ_IO *pq;
 
 public:
     mq_parallel_sssp_base(graph *g_ptr,
@@ -125,41 +164,48 @@ public:
                           size_t num_threads,
                           size_t num_queues)
             : sssp(g_ptr, src_id, dst_id, num_threads) {
-        mq = new MQ_IO(num_queues, num_threads, 0 /*no need to use batches*/);
-        const path_cost f_dist_src = g->f_distance[src];
-        mq->push(std::make_tuple(f_dist_src, src)); // emplace src
+        pq = new MQ_IO(num_queues, num_threads, 0 /*no need to use batches*/);
+        pq->push({ src_to_dist_heuristic_cost, { src, g->get_num_vertices() /*pre*/, 0 } });
     }
 
     virtual ~mq_parallel_sssp_base() {
-        delete mq;
+        delete pq;
     }
 
     virtual void thread_func() = 0;
 };
 
-class mq_parallel_sssp_lock : public mq_parallel_sssp_base {
-    std::vector<std::mutex> locks; // a lock for each vertex
+//
+// MQ with STL Mutex
+//
+
+class mq_parallel_sssp_mtx : public mq_parallel_sssp_base {
+    std::vector<std::mutex> locks;
 
 public:
-    mq_parallel_sssp_lock(graph *g_ptr,
-                          vertex_id src_id,
-                          vertex_id dst_id,
-                          size_t num_threads,
-                          size_t num_queues)
+    mq_parallel_sssp_mtx(graph *g_ptr,
+                         vertex_id src_id,
+                         vertex_id dst_id,
+                         size_t num_threads,
+                         size_t num_queues)
             : mq_parallel_sssp_base(g_ptr, src_id, dst_id, num_threads, num_queues) {
         locks = std::vector<std::mutex>(g->get_num_vertices());
     }
 
-    ~mq_parallel_sssp_lock() {}
+    ~mq_parallel_sssp_mtx() {}
 
     void thread_func();
 };
 
-class mq_parallel_sssp_ttas : public mq_parallel_sssp_base {
+//
+// MQ with Test-and-Set Spin Lock
+//
+
+class mq_parallel_sssp_spin : public mq_parallel_sssp_base {
     std::vector<std::atomic_flag> lock_flags;
 
 public:
-    mq_parallel_sssp_ttas(graph *g_ptr,
+    mq_parallel_sssp_spin(graph *g_ptr,
                           vertex_id src_id,
                           vertex_id dst_id,
                           size_t num_threads,
@@ -168,10 +214,14 @@ public:
         lock_flags = std::vector<std::atomic_flag>(g->get_num_vertices());
     }
 
-    ~mq_parallel_sssp_ttas() {}
+    ~mq_parallel_sssp_spin() {}
 
     void thread_func();
 };
+
+//
+// MQ with update-with-min lock-free technique
+//
 
 class mq_parallel_sssp_update_with_min : public mq_parallel_sssp_base {
 public:
@@ -181,36 +231,10 @@ public:
                                      size_t num_threads,
                                      size_t num_queues)
             : mq_parallel_sssp_base(g_ptr, src_id, dst_id, num_threads, num_queues) {
-        g->use_packed_predecessor_and_g_dist = true;
+        g->use_packed_predecessor_and_best_total_cost = true;
     }
 
     ~mq_parallel_sssp_update_with_min() {}
-
-    void thread_func();
-};
-
-#include "oneapi/tbb/concurrent_priority_queue.h"
-#include "oneapi/tbb/spin_mutex.h"
-
-class tbb_parallel_sssp : public sssp {
-    struct compare_f {
-        bool operator()(const vertex_rec &u, const vertex_rec &v) const {
-            return std::get<0>(u) > std::get<0>(v);
-        }
-    };
-    oneapi::tbb::concurrent_priority_queue<vertex_rec, compare_f> open_set; // tentative vertices
-    oneapi::tbb::spin_mutex *locks; // a lock for each vertex
-
-public:
-    tbb_parallel_sssp(graph *g_ptr, vertex_id src_id, vertex_id dst_id, size_t num_threads)
-            : sssp(g_ptr, src_id, dst_id, num_threads) {
-        locks = new oneapi::tbb::spin_mutex[g->get_num_vertices()];
-        open_set.emplace(g->f_distance[src], src); // emplace src into open_set
-    }
-
-    ~tbb_parallel_sssp() {
-        delete[] locks;
-    }
 
     void thread_func();
 };
