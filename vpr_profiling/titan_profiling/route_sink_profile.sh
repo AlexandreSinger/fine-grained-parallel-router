@@ -20,13 +20,14 @@ cd temp_route_sink
 BENCHMARK_DIR=../benchmarks/$CIRCUIT_NAME
 
 $VTR_ROOT/vpr/vpr \
-	$ARCH \
-	--net_file $BENCHMARK_DIR/$FULL_CIRCUIT_NAME.net \
-	--place_file $BENCHMARK_DIR/$FULL_CIRCUIT_NAME.place \
-	--read_rr_graph $BENCHMARK_DIR/$CIRCUIT_NAME.rr_graph.xml \
-	--read_router_lookahead $BENCHMARK_DIR/$CIRCUIT_NAME.router_lookahead.capnp \
-	--route \
-	--route_chan_width $CHANNEL_WIDTH \
-	--max_router_iterations 400 \
-	$BENCHMARK
+    $ARCH \
+    --net_file $BENCHMARK_DIR/$FULL_CIRCUIT_NAME.net \
+    --place_file $BENCHMARK_DIR/$FULL_CIRCUIT_NAME.place \
+    --read_rr_graph $BENCHMARK_DIR/$CIRCUIT_NAME.rr_graph.xml \
+    --read_router_lookahead $BENCHMARK_DIR/$CIRCUIT_NAME.router_lookahead.capnp \
+    --route \
+    --route_chan_width $CHANNEL_WIDTH \
+    --max_router_iterations 400 \
+    --initial_pres_fac 1.0 --router_profiler_astar_fac 1.5 --seed 3 \
+    $BENCHMARK
 
