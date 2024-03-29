@@ -38,6 +38,14 @@ def command_parser(prog=None):
         metavar="NUM_PROC",
     )
 
+    default_vtr_dir = os.path.expanduser("~") + "/vtr-verilog-to-routing"
+    parser.add_argument(
+        "-vtr_dir",
+        default=default_vtr_dir,
+        type=str,
+        metavar="VTR_DIR",
+    )
+
     return parser
 
 # Run a single circuit through VPR route flow.
@@ -48,13 +56,10 @@ def run_vpr_route(thread_args):
     working_dir = thread_args[1]
     circuit_name = thread_args[2]
     arch_name = thread_args[3]
+    vtr_dir = thread_args[4]
 
     # Change directory to the working directory
     os.chdir(working_dir)
-
-    # Get the current location of the VTR directory
-    # TODO: Make this a command line argument
-    vtr_dir = os.path.expanduser("~") + "/vtr-verilog-to-routing"
 
     # Get the vpr executable and other required information.
     vpr_exec = vtr_dir + "/vpr/vpr"
@@ -97,8 +102,7 @@ def run_vpr_route(thread_args):
     print(f"{circuit_name} is done!")
 
 # Helper method to parse the QoR and Runtimes of the run.
-def run_parse_vtr_task(test_dir):
-    vtr_dir = os.path.expanduser("~") + "/vtr-verilog-to-routing"
+def run_parse_vtr_task(test_dir, vtr_dir):
     parse_vtr_task_exec = vtr_dir + "/vtr_flow/scripts/python_libs/vtr/parse_vtr_task.py"
 
     print("Parsing VTR Task...")
@@ -150,13 +154,13 @@ def run_test_main(arg_list, prog=None):
         circuit_common_path = circuit_path + "/common"
         os.mkdir(circuit_path)
         os.mkdir(circuit_common_path)
-        thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch])
+        thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch, args.vtr_dir])
 
     pool = Pool(args.j)
     pool.map(run_vpr_route, thread_args)
     pool.close()
 
-    run_parse_vtr_task(test_dir)
+    run_parse_vtr_task(test_dir, args.vtr_dir)
 
 if __name__ == "__main__":
     run_test_main(sys.argv[1:])
