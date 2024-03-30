@@ -228,7 +228,7 @@ def run_test_main(arg_list, prog=None):
     geomean_runtime = geomean_runtime ** (1.0 / count)
     geomean_cpd = geomean_cpd ** (1.0 / count)
     geomean_wl = geomean_wl ** (1.0 / count)
-    print(f"Geomean:\t{geomean_runtime}\t{geomean_cpd}\t{geomean_wl}")
+    print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_wl}")
 
 if __name__ == "__main__":
     run_test_main(sys.argv[1:])
