@@ -24,6 +24,8 @@ def get_vpr_args_from_config(config_file):
         for line in f:
             if line.startswith("script_params="):
                 script_params = line.split("=", 1)[1].strip()
+                if script_params == "":
+                    return []
                 # Split the script_params string into individual parameters
                 params_list = script_params.split(" ")
                 return params_list
@@ -183,6 +185,50 @@ def run_test_main(arg_list, prog=None):
     pool.close()
 
     run_parse_vtr_task(test_dir, args.vtr_dir)
+
+    # Parse the out files to get data on the run.
+    print("*" * 30)
+    print("*     Routing Information    *")
+    print("*" * 30)
+    print("Circuit:\tCPD(ns)\tRun-time(s)\tWirelength")
+    geomean_runtime = 1
+    geomean_cpd = 1
+    geomean_wl = 1
+    count = 0
+    for circuit in circuits:
+        print(circuit, end=':\t')
+        circuit_path = arch_dir + "/" + circuit
+        circuit_common_path = circuit_path + "/common"
+        vpr_out_file = circuit_common_path + "/vpr.out"
+
+        with open(vpr_out_file, 'r') as f:
+            routing_time_pattern = r"Routing took (\d+\.\d+) seconds.*max_rss (\d+\.\d+) MiB"
+            cpd_pattern = r"Critical path: (\d+\.\d+) ns"
+            wl_pattern = r"Total wirelength: (\d+), average net length"
+            for line in f:
+                routing_time_match = re.search(routing_time_pattern, line)
+                if routing_time_match:
+                    time_taken = float(routing_time_match.group(1))
+                    max_rss = float(routing_time_match.group(2))
+                    print(time_taken, end="\t")
+                    geomean_runtime *= time_taken
+                    count += 1
+                cpd_match = re.search(cpd_pattern, line)
+                if cpd_match:
+                    cpd = float(cpd_match.group(1))
+                    print(cpd, end="\t")
+                    geomean_cpd *= cpd
+                wl_match = re.search(wl_pattern, line)
+                if wl_match:
+                    wl = int(wl_match.group(1))
+                    print(wl, end="\t")
+                    geomean_wl *= wl
+
+            print("")
+    geomean_runtime = geomean_runtime ** (1.0 / count)
+    geomean_cpd = geomean_cpd ** (1.0 / count)
+    geomean_wl = geomean_wl ** (1.0 / count)
+    print(f"Geomean:\t{geomean_runtime}\t{geomean_cpd}\t{geomean_wl}")
 
 if __name__ == "__main__":
     run_test_main(sys.argv[1:])

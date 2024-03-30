@@ -3,5 +3,7 @@ tests/
 
 titan/
 koios_medium/
+mcnc_min_search/
+mcnc/
 
 *.swp
