@@ -14,3 +14,8 @@ cd /path/to/pq_profiling/astar_sssp
 mkdir build && cd build
 cmake .. && make && ./benchmark
 ```
+
+## Testing
+
+The `testing` directory contains a script used to test the parallel router on real circuits of varying sizes. Used for debugging the parallel router and profiling.
+
