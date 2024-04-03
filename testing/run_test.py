@@ -100,6 +100,18 @@ def run_vpr_route(thread_args):
     if os.path.isfile(sdc_file):
         sdc_args = ["--sdc_file", sdc_file]
 
+    # Check if the rr graph file exists and if so add it to the args
+    rr_graph_args = []
+    rr_graph_file = circuit_base + ".rr_graph.bin"
+    if os.path.isfile(rr_graph_file):
+        rr_graph_args = ["--read_rr_graph", rr_graph_file]
+
+    # Check if the router lookahead file exists and if so add it to the args
+    router_lookahead_args = []
+    router_lookahead_file = circuit_base + ".router_lookahead.capnp"
+    if os.path.isfile(rr_graph_file):
+        router_lookahead_args = ["--read_router_lookahead", router_lookahead_file]
+
     # Run the process with the correct arguments
     process = Popen([vpr_exec,
         arch,
@@ -107,7 +119,7 @@ def run_vpr_route(thread_args):
         "--net_file", net_file,
         "--place_file", place_file,
         "--route",
-        "--analysis"] + config_args + sdc_args,
+        "--analysis"] + config_args + sdc_args + rr_graph_args + router_lookahead_args,
         stdout=PIPE,
         stderr=PIPE)
 
