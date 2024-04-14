@@ -2,6 +2,7 @@
 tests/
 
 titan/
+longest_titan/
 bwave_like/
 koios_medium/
 mcnc_min_search/
