@@ -68,6 +68,22 @@ def command_parser(prog=None):
         metavar="VTR_DIR",
     )
 
+    default_tests_reference_dir = "/home/singera8/research/fine-grained-parallel-router/testing/tests"
+    parser.add_argument(
+        "-tests-reference-dir-base",
+        default=default_tests_reference_dir,
+        type=str,
+        metavar="TESTS_REFERENCE_DIR_BASE",
+    )
+
+
+    parser.add_argument(
+        "-extra-vpr-args",
+        default="",
+        type=str,
+        metavar="EXTRA_VPR_ARGS",
+    )
+
     return parser
 
 # Run a single circuit through VPR route flow.
@@ -80,6 +96,7 @@ def run_vpr_route(thread_args):
     arch_name = thread_args[3]
     vtr_dir = thread_args[4]
     config_file = thread_args[5]
+    extra_vpr_args = thread_args[6]
 
     # Change directory to the working directory
     os.chdir(working_dir)
@@ -112,6 +129,11 @@ def run_vpr_route(thread_args):
     if os.path.isfile(rr_graph_file):
         router_lookahead_args = ["--read_router_lookahead", router_lookahead_file]
 
+    # Handle the extra vpr args passed in by the user
+    extra_vpr_args = extra_vpr_args.split(" ")
+    if (len(extra_vpr_args) != 0 and extra_vpr_args[0] == ""):
+        extra_vpr_args = []
+
     # Run the process with the correct arguments
     process = Popen([vpr_exec,
         arch,
@@ -119,7 +141,7 @@ def run_vpr_route(thread_args):
         "--net_file", net_file,
         "--place_file", place_file,
         "--route",
-        "--analysis"] + config_args + sdc_args + rr_graph_args + router_lookahead_args,
+        "--analysis"] + config_args + sdc_args + rr_graph_args + router_lookahead_args + extra_vpr_args,
         stdout=PIPE,
         stderr=PIPE)
 
@@ -150,7 +172,7 @@ def run_test_main(arg_list, prog=None):
     # Load the arguments
     args = command_parser(prog).parse_args(arg_list)
 
-    tests_reference_dir = "/home/singera8/research/fine-grained-parallel-router/testing/tests/" + args.test_name
+    tests_reference_dir = args.tests_reference_dir_base + "/" + args.test_name
     if not os.path.isdir(tests_reference_dir):
         print("Invalid test")
         return
@@ -159,7 +181,7 @@ def run_test_main(arg_list, prog=None):
 
     reference_dir = tests_reference_dir + "/" + arch
     circuits = os.listdir(reference_dir)
-    
+
     script_dir = str(pathlib.Path(__file__).parent.resolve())
     test_dir = script_dir + "/" + args.test_name
     os.makedirs(test_dir, exist_ok=True)
@@ -190,7 +212,7 @@ def run_test_main(arg_list, prog=None):
         circuit_common_path = circuit_path + "/common"
         os.mkdir(circuit_path)
         os.mkdir(circuit_common_path)
-        thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch, args.vtr_dir, config_dir + "/config.txt"])
+        thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch, args.vtr_dir, config_dir + "/config.txt", args.extra_vpr_args])
 
     pool = Pool(args.j)
     pool.map(run_vpr_route, thread_args)

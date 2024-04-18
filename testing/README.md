@@ -11,6 +11,7 @@ The following test suites are supported:
 | Suite | Run time | Description | Source |
 | ----- | -------- | ----------- | ------ |
 | `titan` | ~2 hours on 10 cores | Large Titan circuits | `regression_tests/vtr_reg_nightly_test2/titan_quick_qor` |
+| `longest_titan` | ~6 hours on 1 core | Top 4 Longest Titan Circuits | `regression_tests/vtr_reg_nightly_test2/titan_quick_qor` |
 | `bwave_like` | ~20 mins on 1 core | Large bwave-like circuit for profiling | Koios Benchmark Suite |
 | `koios_medium` | ~10 mins on 10 cores | Medium Koios circuits | `regression_tests/vtr_reg_nightly_test4/koios_medium` |
 | `mcnc_min_search` | ~2 mins on 10 cores | MCNC circuits with minimum channel width search | `regression_tests/vtr_reg_nightly_test1/vpr_reg_mcnc` |
