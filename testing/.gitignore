@@ -5,7 +5,11 @@ titan/
 longest_titan/
 bwave_like/
 koios_medium/
+koios_quick/
 mcnc_min_search/
 mcnc/
+titan_quick/
+vtr/
+vtr_min_search/
 
 *.swp

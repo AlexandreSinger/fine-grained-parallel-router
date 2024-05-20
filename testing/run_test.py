@@ -218,51 +218,99 @@ def run_test_main(arg_list, prog=None):
     pool.map(run_vpr_route, thread_args)
     pool.close()
 
-    run_parse_vtr_task(test_dir, args.vtr_dir)
+    # Commented out since it was hardly working and never used.
+    # run_parse_vtr_task(test_dir, args.vtr_dir)
 
-    # Parse the out files to get data on the run.
-    print("*" * 30)
-    print("*     Routing Information    *")
-    print("*" * 30)
-    print("Circuit:\tCPD(ns)\tRun-time(s)\tWirelength")
-    geomean_runtime = 1
-    geomean_cpd = 1
-    geomean_wl = 1
-    count = 0
+    # Collect the runtimes, CPD, and wirelengths of the circuits
+    runtimes = dict()
+    cpds = dict()
+    wls = dict()
+    magic_cookies = dict()
     for circuit in circuits:
-        print(circuit, end=':\t')
+        runtimes[circuit] = []
+        cpds[circuit] = []
+        wls[circuit] = []
+        magic_cookies[circuit] = []
+
         circuit_path = arch_dir + "/" + circuit
         circuit_common_path = circuit_path + "/common"
         vpr_out_file = circuit_common_path + "/vpr.out"
-
         with open(vpr_out_file, 'r') as f:
             routing_time_pattern = r"Routing took (\d+\.\d+) seconds.*max_rss (\d+\.\d+) MiB"
             cpd_pattern = r"Critical path: (\d+\.\d+) ns"
             wl_pattern = r"Total wirelength: (\d+), average net length"
+            magic_cookie_pattern = r"Serial number \(magic cookie\) for the routing is: (-?\d+)"
             for line in f:
                 routing_time_match = re.search(routing_time_pattern, line)
                 if routing_time_match:
                     time_taken = float(routing_time_match.group(1))
                     max_rss = float(routing_time_match.group(2))
-                    print(time_taken, end="\t")
-                    geomean_runtime *= time_taken
-                    count += 1
+                    runtimes[circuit].append(time_taken)
                 cpd_match = re.search(cpd_pattern, line)
                 if cpd_match:
                     cpd = float(cpd_match.group(1))
-                    print(cpd, end="\t")
-                    geomean_cpd *= cpd
+                    cpds[circuit].append(cpd)
                 wl_match = re.search(wl_pattern, line)
                 if wl_match:
                     wl = int(wl_match.group(1))
-                    print(wl, end="\t")
-                    geomean_wl *= wl
+                    wls[circuit].append(wl)
+                magic_cookie_match = re.search(magic_cookie_pattern, line)
+                if magic_cookie_match:
+                    magic_cookie = int(magic_cookie_match.group(1))
+                    magic_cookies[circuit].append(magic_cookie)
 
-            print("")
+    # Quick safety check to ensure that the circuits have routed.
+    # Assumption: For a circuit to route, it must have a CPD
+    all_circuits_have_routed = True
+    for circuit in circuits:
+        if len(cpds) == 0:
+            print("{circuit}")
+            all_circuits_have_routed = False
+
+    if not all_circuits_have_routed:
+        print("ERROR: Not all circuits routed successfully!")
+        return
+
+    # Calculate the interesting information
+    geomean_runtime = 1
+    geomean_cpd = 1
+    geomean_wl = 1
+    magic_number = 0
+    # Note: This needs to be sorted so the magic number always returns the correct
+    #       magic number regardless of machine.
+    for circuit in sorted(circuits):
+        # Calculate the geomeans
+        cpd = cpds[circuit][-1]
+        runtime = runtimes[circuit][-1]
+        wl = wls[circuit][-1]
+        geomean_cpd *= cpd
+        geomean_runtime *= runtime
+        geomean_wl *= wl
+        # Compute the magic number (used to quickly check determinism)
+        # Note: we use the previous magic number in a tuple to make enforce order.
+        for cpd in cpds[circuit]:
+            magic_number = hash((magic_number, cpd))
+        for wl in wls[circuit]:
+            magic_number = hash((magic_number, wl))
+        for magic_cookie in magic_cookies[circuit]:
+            magic_number = hash((magic_number, magic_cookie))
+    count = len(circuits)
     geomean_runtime = geomean_runtime ** (1.0 / count)
     geomean_cpd = geomean_cpd ** (1.0 / count)
     geomean_wl = geomean_wl ** (1.0 / count)
-    print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_wl}")
+
+    print("*" * 30)
+    print("*     Routing Information    *")
+    print("*" * 30)
+    print("Circuit:\tCPD(ns)\tRun-time(s)\tWirelength\tMagic-cookie")
+    for circuit in circuits:
+        cpd = cpds[circuit][-1]
+        runtime = runtimes[circuit][-1]
+        wl = wls[circuit][-1]
+        magic_cookie = magic_cookies[circuit][-1]
+        print(f"{circuit}:\t{cpd}\t{runtime}\t{wl}\t{magic_cookie}")
+
+    print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_wl}\t{hex(magic_number)}")
 
 if __name__ == "__main__":
     run_test_main(sys.argv[1:])
