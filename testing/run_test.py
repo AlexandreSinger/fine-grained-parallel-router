@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import copy
 import os
 import re
 import sys
@@ -29,6 +30,16 @@ def get_vpr_args_from_config(config_file):
                 # Split the script_params string into individual parameters
                 params_list = script_params.split(" ")
                 return params_list
+    return None
+
+def get_min_chan_width(circuit, config_dir):
+    min_chan_width_file = config_dir + "/min_w.txt"
+    with open(min_chan_width_file, 'r') as f:
+        for line in f:
+            if line.startswith(circuit):
+                min_chan_width = line.split(" ", 1)[1].strip()
+                assert(min_chan_width != "")
+                return int(min_chan_width)
     return None
 
 # Helper method to extract the run number from the given run directory name.
@@ -84,6 +95,11 @@ def command_parser(prog=None):
         metavar="EXTRA_VPR_ARGS",
     )
 
+    parser.add_argument(
+        "-run-at-min-chan-width",
+        action='store_true'
+    )
+
     return parser
 
 # Run a single circuit through VPR route flow.
@@ -128,11 +144,6 @@ def run_vpr_route(thread_args):
     router_lookahead_file = circuit_base + ".router_lookahead.capnp"
     if os.path.isfile(rr_graph_file):
         router_lookahead_args = ["--read_router_lookahead", router_lookahead_file]
-
-    # Handle the extra vpr args passed in by the user
-    extra_vpr_args = extra_vpr_args.split(" ")
-    if (len(extra_vpr_args) != 0 and extra_vpr_args[0] == ""):
-        extra_vpr_args = []
 
     # Run the process with the correct arguments
     process = Popen([vpr_exec,
@@ -206,13 +217,26 @@ def run_test_main(arg_list, prog=None):
     os.mkdir(arch_dir)
     print(arch_dir)
 
+    # Handle the extra vpr args passed in by the user
+    extra_vpr_args = args.extra_vpr_args.split(" ")
+    if (len(extra_vpr_args) != 0 and extra_vpr_args[0] == ""):
+        extra_vpr_args = []
+
     thread_args = []
     for circuit in circuits:
         circuit_path = arch_dir + "/" + circuit
         circuit_common_path = circuit_path + "/common"
         os.mkdir(circuit_path)
         os.mkdir(circuit_common_path)
-        thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch, args.vtr_dir, config_dir + "/config.txt", args.extra_vpr_args])
+
+        circuit_extra_vpr_args = copy.deepcopy(extra_vpr_args)
+        if args.run_at_min_chan_width:
+            # get the minimum channel width
+            min_chan_width = get_min_chan_width(circuit, config_dir)
+            assert(min_chan_width != None)
+            circuit_extra_vpr_args += ["--route_chan_width", str(min_chan_width)];
+
+        thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch, args.vtr_dir, config_dir + "/config.txt", circuit_extra_vpr_args])
 
     pool = Pool(args.j)
     pool.map(run_vpr_route, thread_args)
