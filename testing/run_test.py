@@ -249,11 +249,13 @@ def run_test_main(arg_list, prog=None):
     runtimes = dict()
     cpds = dict()
     wls = dict()
+    min_chan_widths = dict()
     magic_cookies = dict()
     for circuit in circuits:
         runtimes[circuit] = []
         cpds[circuit] = []
         wls[circuit] = []
+        min_chan_widths[circuit] = []
         magic_cookies[circuit] = []
 
         circuit_path = arch_dir + "/" + circuit
@@ -263,6 +265,7 @@ def run_test_main(arg_list, prog=None):
             routing_time_pattern = r"Routing took (\d+\.\d+) seconds.*max_rss (\d+\.\d+) MiB"
             cpd_pattern = r"Critical path: (\d+\.\d+) ns"
             wl_pattern = r"Total wirelength: (\d+), average net length"
+            min_chan_width_pattern = r"Best routing used a channel width factor of (\d+)."
             magic_cookie_pattern = r"Serial number \(magic cookie\) for the routing is: (-?\d+)"
             for line in f:
                 routing_time_match = re.search(routing_time_pattern, line)
@@ -278,6 +281,10 @@ def run_test_main(arg_list, prog=None):
                 if wl_match:
                     wl = int(wl_match.group(1))
                     wls[circuit].append(wl)
+                min_chan_width_match = re.search(min_chan_width_pattern, line)
+                if min_chan_width_match:
+                    min_chan_width = int(min_chan_width_match.group(1))
+                    min_chan_widths[circuit].append(min_chan_width)
                 magic_cookie_match = re.search(magic_cookie_pattern, line)
                 if magic_cookie_match:
                     magic_cookie = int(magic_cookie_match.group(1))
@@ -286,10 +293,13 @@ def run_test_main(arg_list, prog=None):
     # Quick safety check to ensure that the circuits have routed.
     # Assumption: For a circuit to route, it must have a CPD
     all_circuits_have_routed = True
+    has_min_chan_widths = False
     for circuit in circuits:
-        if len(cpds) == 0:
+        if len(cpds[circuit]) == 0:
             print("{circuit}")
             all_circuits_have_routed = False
+        if len(min_chan_widths[circuit]) != 0:
+            has_min_chan_widths = True
 
     if not all_circuits_have_routed:
         print("ERROR: Not all circuits routed successfully!")
@@ -299,6 +309,7 @@ def run_test_main(arg_list, prog=None):
     geomean_runtime = 1
     geomean_cpd = 1
     geomean_wl = 1
+    geomean_min_chan_width = 1
     magic_number = 0
     # Note: This needs to be sorted so the magic number always returns the correct
     #       magic number regardless of machine.
@@ -310,6 +321,9 @@ def run_test_main(arg_list, prog=None):
         geomean_cpd *= cpd
         geomean_runtime *= runtime
         geomean_wl *= wl
+        if has_min_chan_widths:
+            min_chan_width = min_chan_widths[circuit][-1]
+            geomean_min_chan_width *= min_chan_width
         # Compute the magic number (used to quickly check determinism)
         # Note: we use the previous magic number in a tuple to make enforce order.
         for cpd in cpds[circuit]:
@@ -322,19 +336,30 @@ def run_test_main(arg_list, prog=None):
     geomean_runtime = geomean_runtime ** (1.0 / count)
     geomean_cpd = geomean_cpd ** (1.0 / count)
     geomean_wl = geomean_wl ** (1.0 / count)
+    geomean_min_chan_width = geomean_min_chan_width ** (1.0 / count)
 
     print("*" * 30)
     print("*     Routing Information    *")
     print("*" * 30)
-    print("Circuit:\tCPD(ns)\tRun-time(s)\tWirelength\tMagic-cookie")
+    if has_min_chan_widths:
+        print("Circuit:\tCPD(ns)\tRun-time(s)\tWirelength\tMagic-cookie\tmin_chan_width")
+    else:
+        print("Circuit:\tCPD(ns)\tRun-time(s)\tWirelength\tMagic-cookie")
     for circuit in circuits:
         cpd = cpds[circuit][-1]
         runtime = runtimes[circuit][-1]
         wl = wls[circuit][-1]
         magic_cookie = magic_cookies[circuit][-1]
-        print(f"{circuit}:\t{cpd}\t{runtime}\t{wl}\t{magic_cookie}")
+        if has_min_chan_widths:
+            min_chan_width = min_chan_widths[circuit][-1]
+            print(f"{circuit}:\t{cpd}\t{runtime}\t{wl}\t{magic_cookie}\t{min_chan_width}")
+        else:
+            print(f"{circuit}:\t{cpd}\t{runtime}\t{wl}\t{magic_cookie}")
 
-    print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_wl}\t{hex(magic_number)}")
+    if has_min_chan_widths:
+        print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_wl}\t{hex(magic_number)}\t{geomean_min_chan_width}")
+    else:
+        print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_wl}\t{hex(magic_number)}")
 
 if __name__ == "__main__":
     run_test_main(sys.argv[1:])
