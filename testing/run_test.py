@@ -247,12 +247,14 @@ def run_test_main(arg_list, prog=None):
 
     # Collect the runtimes, CPD, and wirelengths of the circuits
     runtimes = dict()
+    sssp_runtimes = dict()
     cpds = dict()
     wls = dict()
     min_chan_widths = dict()
     magic_cookies = dict()
     for circuit in circuits:
         runtimes[circuit] = []
+        sssp_runtimes[circuit] = []
         cpds[circuit] = []
         wls[circuit] = []
         min_chan_widths[circuit] = []
@@ -263,6 +265,7 @@ def run_test_main(arg_list, prog=None):
         vpr_out_file = circuit_common_path + "/vpr.out"
         with open(vpr_out_file, 'r') as f:
             routing_time_pattern = r"Routing took (\d+\.\d+) seconds.*max_rss (\d+\.\d+) MiB"
+            sssp_time_pattern = r"Time spent computing SSSP: (\d+\.\d+) seconds"
             cpd_pattern = r"Critical path: (\d+\.\d+) ns"
             wl_pattern = r"Total wirelength: (\d+), average net length"
             min_chan_width_pattern = r"Best routing used a channel width factor of (\d+)."
@@ -273,6 +276,10 @@ def run_test_main(arg_list, prog=None):
                     time_taken = float(routing_time_match.group(1))
                     max_rss = float(routing_time_match.group(2))
                     runtimes[circuit].append(time_taken)
+                sssp_time_match = re.search(sssp_time_pattern, line)
+                if sssp_time_match:
+                    time_taken = float(sssp_time_match.group(1))
+                    sssp_runtimes[circuit].append(time_taken)
                 cpd_match = re.search(cpd_pattern, line)
                 if cpd_match:
                     cpd = float(cpd_match.group(1))
@@ -307,6 +314,7 @@ def run_test_main(arg_list, prog=None):
 
     # Calculate the interesting information
     geomean_runtime = 1
+    geomean_sssp_runtime = 1
     geomean_cpd = 1
     geomean_wl = 1
     geomean_min_chan_width = 1
@@ -317,9 +325,11 @@ def run_test_main(arg_list, prog=None):
         # Calculate the geomeans
         cpd = cpds[circuit][-1]
         runtime = runtimes[circuit][-1]
+        sssp_runtime = sum(sssp_runtimes[circuit])
         wl = wls[circuit][-1]
         geomean_cpd *= cpd
         geomean_runtime *= runtime
+        geomean_sssp_runtime *= sssp_runtime
         geomean_wl *= wl
         if has_min_chan_widths:
             min_chan_width = min_chan_widths[circuit][-1]
@@ -334,6 +344,7 @@ def run_test_main(arg_list, prog=None):
             magic_number = hash((magic_number, magic_cookie))
     count = len(circuits)
     geomean_runtime = geomean_runtime ** (1.0 / count)
+    geomean_sssp_runtime = geomean_sssp_runtime ** (1.0 / count)
     geomean_cpd = geomean_cpd ** (1.0 / count)
     geomean_wl = geomean_wl ** (1.0 / count)
     geomean_min_chan_width = geomean_min_chan_width ** (1.0 / count)
@@ -342,24 +353,25 @@ def run_test_main(arg_list, prog=None):
     print("*     Routing Information    *")
     print("*" * 30)
     if has_min_chan_widths:
-        print("Circuit:\tCPD(ns)\tRun-time(s)\tWirelength\tMagic-cookie\tmin_chan_width")
+        print("Circuit:\tCPD(ns)\tRun-time(s)\tSSSP-Run-time(s)\tWirelength\tMagic-cookie\tmin_chan_width")
     else:
-        print("Circuit:\tCPD(ns)\tRun-time(s)\tWirelength\tMagic-cookie")
+        print("Circuit:\tCPD(ns)\tRun-time(s)\tSSSP-Run-time(s)\tWirelength\tMagic-cookie")
     for circuit in circuits:
         cpd = cpds[circuit][-1]
         runtime = runtimes[circuit][-1]
+        sssp_runtime = sum(sssp_runtimes[circuit])
         wl = wls[circuit][-1]
         magic_cookie = magic_cookies[circuit][-1]
         if has_min_chan_widths:
             min_chan_width = min_chan_widths[circuit][-1]
-            print(f"{circuit}:\t{cpd}\t{runtime}\t{wl}\t{magic_cookie}\t{min_chan_width}")
+            print(f"{circuit}:\t{cpd}\t{runtime}\t{sssp_runtime}\t{wl}\t{magic_cookie}\t{min_chan_width}")
         else:
-            print(f"{circuit}:\t{cpd}\t{runtime}\t{wl}\t{magic_cookie}")
+            print(f"{circuit}:\t{cpd}\t{runtime}\t{sssp_runtime}\t{wl}\t{magic_cookie}")
 
     if has_min_chan_widths:
-        print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_wl}\t{hex(magic_number)}\t{geomean_min_chan_width}")
+        print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_sssp_runtime}\t{geomean_wl}\t{hex(magic_number)}\t{geomean_min_chan_width}")
     else:
-        print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_wl}\t{hex(magic_number)}")
+        print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_sssp_runtime}\t{geomean_wl}\t{hex(magic_number)}")
 
 if __name__ == "__main__":
     run_test_main(sys.argv[1:])

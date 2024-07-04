@@ -1,15 +1,19 @@
 
 tests/
 
-titan/
-longest_titan/
+bitcoin_single/
 bwave_like/
+koios_large/
 koios_medium/
 koios_quick/
-mcnc_min_search/
+longest_titan/
 mcnc/
+mcnc_min_search/
+titan/
 titan_quick/
 vtr/
+vtr_chain/
+vtr_chain_min_search/
 vtr_min_search/
 
 *.swp
