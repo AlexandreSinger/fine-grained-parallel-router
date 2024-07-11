@@ -6,7 +6,7 @@ import re
 import sys
 import argparse
 from multiprocessing import Pool
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, TimeoutExpired
 import pathlib
 import shutil
 
@@ -100,6 +100,14 @@ def command_parser(prog=None):
         action='store_true'
     )
 
+    # Timeout in seconds, 0 implies no timeout
+    parser.add_argument(
+        "-timeout",
+        default=0,
+        type=float,
+        metavar="TIMEOUT",
+    )
+
     return parser
 
 # Run a single circuit through VPR route flow.
@@ -113,6 +121,7 @@ def run_vpr_route(thread_args):
     vtr_dir = thread_args[4]
     config_file = thread_args[5]
     extra_vpr_args = thread_args[6]
+    timeout = thread_args[7]
 
     # Change directory to the working directory
     os.chdir(working_dir)
@@ -157,7 +166,16 @@ def run_vpr_route(thread_args):
         stderr=PIPE)
 
     # Store the output of the command
-    stdout, stderr = process.communicate()
+    if timeout == 0.0:
+        timeout = None
+    circuit_timed_out = False
+    # https://docs.python.org/3/library/subprocess.html#subprocess.Popen.communicate
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+        circuit_timed_out = True
 
     with open("vpr.out", "w") as f:
         f.write(stdout.decode())
@@ -167,7 +185,10 @@ def run_vpr_route(thread_args):
         f.write(stderr.decode())
         f.close()
 
-    print(f"{circuit_name} is done!")
+    if not circuit_timed_out:
+        print(f"{circuit_name} is done!")
+    else:
+        print(f"{circuit_name} timed out after {timeout} seconds!")
 
 # Helper method to parse the QoR and Runtimes of the run.
 def run_parse_vtr_task(test_dir, vtr_dir):
@@ -178,6 +199,51 @@ def run_parse_vtr_task(test_dir, vtr_dir):
         test_dir])
     process.communicate()
     print("Parse VTR Task Completed")
+
+class RunData:
+    circuit_name: str = None
+    cpd: float = None
+    wl: int = None
+    runtime: float = None
+    sssp_runtime: float = None
+    min_chan_width: int = None
+    vtr_magic_cookie: int = None
+    total_magic_cookie: int = None
+
+    def __init__(self, circuit_name):
+        self.circuit_name = circuit_name
+
+    def has_min_chan_width(self):
+        return (self.min_chan_width != None)
+
+    def has_complete_data(self, should_have_min_chan_width):
+        if self.cpd == None:
+            return False
+        if self.wl == None:
+            return False
+        if self.runtime == None:
+            return False
+        if self.sssp_runtime == None:
+            return False
+        if self.min_chan_width == None and should_have_min_chan_width:
+            return False
+        if self.vtr_magic_cookie == None:
+            return False
+        if self.total_magic_cookie == None:
+            return False
+        return True
+
+    def print(self, has_min_chan_width):
+        if not self.has_complete_data(has_min_chan_width):
+            if has_min_chan_width:
+                print(f"{self.circuit_name}:\t-\t-\t-\t-\t-\t-")
+            else:
+                print(f"{self.circuit_name}:\t-\t-\t-\t-\t-")
+            return
+        if has_min_chan_width:
+            print(f"{self.circuit_name}:\t{self.cpd}\t{self.runtime}\t{self.sssp_runtime}\t{self.wl}\t{self.vtr_magic_cookie}\t{self.min_chan_width}")
+        else:
+            print(f"{self.circuit_name}:\t{self.cpd}\t{self.runtime}\t{self.sssp_runtime}\t{self.wl}\t{self.vtr_magic_cookie}")
 
 def run_test_main(arg_list, prog=None):
     # Load the arguments
@@ -203,7 +269,7 @@ def run_test_main(arg_list, prog=None):
     # Get the run name
     runs = os.listdir(test_dir)
     last_run_num = 0
-    if len(runs) is not 0:
+    if len(runs) != 0:
         last_run = sorted(runs)[-1]
         last_run_num = extract_run_number(last_run)
         if last_run_num is None:
@@ -223,7 +289,7 @@ def run_test_main(arg_list, prog=None):
         extra_vpr_args = []
 
     thread_args = []
-    for circuit in circuits:
+    for circuit in sorted(circuits):
         circuit_path = arch_dir + "/" + circuit
         circuit_common_path = circuit_path + "/common"
         os.mkdir(circuit_path)
@@ -236,7 +302,7 @@ def run_test_main(arg_list, prog=None):
             assert(min_chan_width != None)
             circuit_extra_vpr_args += ["--route_chan_width", str(min_chan_width)];
 
-        thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch, args.vtr_dir, config_dir + "/config.txt", circuit_extra_vpr_args])
+        thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch, args.vtr_dir, config_dir + "/config.txt", circuit_extra_vpr_args, args.timeout])
 
     pool = Pool(args.j)
     pool.map(run_vpr_route, thread_args)
@@ -246,19 +312,14 @@ def run_test_main(arg_list, prog=None):
     # run_parse_vtr_task(test_dir, args.vtr_dir)
 
     # Collect the runtimes, CPD, and wirelengths of the circuits
-    runtimes = dict()
-    sssp_runtimes = dict()
-    cpds = dict()
-    wls = dict()
-    min_chan_widths = dict()
-    magic_cookies = dict()
-    for circuit in circuits:
-        runtimes[circuit] = []
-        sssp_runtimes[circuit] = []
-        cpds[circuit] = []
-        wls[circuit] = []
-        min_chan_widths[circuit] = []
-        magic_cookies[circuit] = []
+    circuit_run_data = dict()
+    for circuit in sorted(circuits):
+        runtimes = []
+        sssp_runtimes = []
+        cpds = []
+        wls = []
+        min_chan_widths = []
+        magic_cookies = []
 
         circuit_path = arch_dir + "/" + circuit
         circuit_common_path = circuit_path + "/common"
@@ -275,42 +336,76 @@ def run_test_main(arg_list, prog=None):
                 if routing_time_match:
                     time_taken = float(routing_time_match.group(1))
                     max_rss = float(routing_time_match.group(2))
-                    runtimes[circuit].append(time_taken)
+                    runtimes.append(time_taken)
                 sssp_time_match = re.search(sssp_time_pattern, line)
                 if sssp_time_match:
                     time_taken = float(sssp_time_match.group(1))
-                    sssp_runtimes[circuit].append(time_taken)
+                    sssp_runtimes.append(time_taken)
                 cpd_match = re.search(cpd_pattern, line)
                 if cpd_match:
                     cpd = float(cpd_match.group(1))
-                    cpds[circuit].append(cpd)
+                    cpds.append(cpd)
                 wl_match = re.search(wl_pattern, line)
                 if wl_match:
                     wl = int(wl_match.group(1))
-                    wls[circuit].append(wl)
+                    wls.append(wl)
                 min_chan_width_match = re.search(min_chan_width_pattern, line)
                 if min_chan_width_match:
                     min_chan_width = int(min_chan_width_match.group(1))
-                    min_chan_widths[circuit].append(min_chan_width)
+                    min_chan_widths.append(min_chan_width)
                 magic_cookie_match = re.search(magic_cookie_pattern, line)
                 if magic_cookie_match:
                     magic_cookie = int(magic_cookie_match.group(1))
-                    magic_cookies[circuit].append(magic_cookie)
+                    magic_cookies.append(magic_cookie)
+        run_data = RunData(circuit)
+        if len(cpds) != 0:
+            run_data.cpd = cpds[-1]
+        if len(wls) != 0:
+            run_data.wl = wls[-1]
+        if len(magic_cookies) != 0:
+            run_data.vtr_magic_cookie = magic_cookies[-1]
+        if len(runtimes) != 0:
+            run_data.runtime = runtimes[-1]
+        if len(sssp_runtimes) != 0:
+            run_data.sssp_runtime = sum(sssp_runtimes)
+        if len(min_chan_widths) != 0:
+            run_data.min_chan_width = min_chan_widths[-1]
+        # Compute the magic number (used to quickly check determinism)
+        # Note: we use the previous magic number in a tuple to make enforce order.
+        total_magic_number = 0
+        for cpd in cpds:
+            total_magic_number = hash((total_magic_number, cpd))
+        for wl in wls:
+            total_magic_number = hash((total_magic_number, wl))
+        for magic_cookie in magic_cookies:
+            total_magic_number = hash((total_magic_number, magic_cookie))
+        run_data.total_magic_cookie = total_magic_number
 
-    # Quick safety check to ensure that the circuits have routed.
-    # Assumption: For a circuit to route, it must have a CPD
-    all_circuits_have_routed = True
+        circuit_run_data[circuit] = run_data
+
+    # Check if any of the circuits have minimum channel width information.
+    # This would mean we are doing a min channel width search
     has_min_chan_widths = False
-    for circuit in circuits:
-        if len(cpds[circuit]) == 0:
-            print("{circuit}")
-            all_circuits_have_routed = False
-        if len(min_chan_widths[circuit]) != 0:
+    for circuit in sorted(circuits):
+        run_data = circuit_run_data[circuit]
+        if run_data.has_min_chan_width():
             has_min_chan_widths = True
+            break;
 
-    if not all_circuits_have_routed:
-        print("ERROR: Not all circuits routed successfully!")
+    # Count the number of circuits which routed successfully (have all of their data).
+    count = 0.0
+    for circuit in sorted(circuits):
+        run_data = circuit_run_data[circuit]
+        if run_data.has_complete_data(has_min_chan_widths):
+            count += 1.0
+
+    # If no circuits have routed successfully, stop.
+    if count == 0.0:
+        print(f"ERROR: No circuits routed successfully!")
         return
+
+    if count != len(circuits):
+        print(f"WARNING: Not all circuits routed successfully! {int(len(circuits) - count)} unrouted.")
 
     # Calculate the interesting information
     geomean_runtime = 1
@@ -322,32 +417,28 @@ def run_test_main(arg_list, prog=None):
     # Note: This needs to be sorted so the magic number always returns the correct
     #       magic number regardless of machine.
     for circuit in sorted(circuits):
+        run_data = circuit_run_data[circuit]
+        if not run_data.has_complete_data(has_min_chan_widths):
+            continue;
         # Calculate the geomeans
-        cpd = cpds[circuit][-1]
-        runtime = runtimes[circuit][-1]
-        sssp_runtime = sum(sssp_runtimes[circuit])
-        wl = wls[circuit][-1]
-        geomean_cpd *= cpd
-        geomean_runtime *= runtime
-        geomean_sssp_runtime *= sssp_runtime
-        geomean_wl *= wl
+        geomean_cpd *= run_data.cpd
+        geomean_runtime *= run_data.runtime
+        geomean_sssp_runtime *= run_data.sssp_runtime
+        geomean_wl *= run_data.wl
         if has_min_chan_widths:
-            min_chan_width = min_chan_widths[circuit][-1]
-            geomean_min_chan_width *= min_chan_width
+            geomean_min_chan_width *= run_data.min_chan_width
         # Compute the magic number (used to quickly check determinism)
         # Note: we use the previous magic number in a tuple to make enforce order.
-        for cpd in cpds[circuit]:
-            magic_number = hash((magic_number, cpd))
-        for wl in wls[circuit]:
-            magic_number = hash((magic_number, wl))
-        for magic_cookie in magic_cookies[circuit]:
-            magic_number = hash((magic_number, magic_cookie))
-    count = len(circuits)
-    geomean_runtime = geomean_runtime ** (1.0 / count)
-    geomean_sssp_runtime = geomean_sssp_runtime ** (1.0 / count)
-    geomean_cpd = geomean_cpd ** (1.0 / count)
-    geomean_wl = geomean_wl ** (1.0 / count)
-    geomean_min_chan_width = geomean_min_chan_width ** (1.0 / count)
+        magic_number = hash((magic_number, run_data.total_magic_cookie))
+
+    geomean_run_data = RunData("Geomean")
+    geomean_run_data.runtime = geomean_runtime ** (1.0 / count)
+    geomean_run_data.sssp_runtime = geomean_sssp_runtime ** (1.0 / count)
+    geomean_run_data.cpd = geomean_cpd ** (1.0 / count)
+    geomean_run_data.wl = geomean_wl ** (1.0 / count)
+    geomean_run_data.min_chan_width = geomean_min_chan_width ** (1.0 / count)
+    geomean_run_data.vtr_magic_cookie = magic_number
+    geomean_run_data.total_magic_cookie = magic_number
 
     print("*" * 30)
     print("*     Routing Information    *")
@@ -356,22 +447,11 @@ def run_test_main(arg_list, prog=None):
         print("Circuit:\tCPD(ns)\tRun-time(s)\tSSSP-Run-time(s)\tWirelength\tMagic-cookie\tmin_chan_width")
     else:
         print("Circuit:\tCPD(ns)\tRun-time(s)\tSSSP-Run-time(s)\tWirelength\tMagic-cookie")
-    for circuit in circuits:
-        cpd = cpds[circuit][-1]
-        runtime = runtimes[circuit][-1]
-        sssp_runtime = sum(sssp_runtimes[circuit])
-        wl = wls[circuit][-1]
-        magic_cookie = magic_cookies[circuit][-1]
-        if has_min_chan_widths:
-            min_chan_width = min_chan_widths[circuit][-1]
-            print(f"{circuit}:\t{cpd}\t{runtime}\t{sssp_runtime}\t{wl}\t{magic_cookie}\t{min_chan_width}")
-        else:
-            print(f"{circuit}:\t{cpd}\t{runtime}\t{sssp_runtime}\t{wl}\t{magic_cookie}")
+    for circuit in sorted(circuits):
+        run_data = circuit_run_data[circuit]
+        run_data.print(has_min_chan_widths)
 
-    if has_min_chan_widths:
-        print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_sssp_runtime}\t{geomean_wl}\t{hex(magic_number)}\t{geomean_min_chan_width}")
-    else:
-        print(f"Geomean:\t{geomean_cpd}\t{geomean_runtime}\t{geomean_sssp_runtime}\t{geomean_wl}\t{hex(magic_number)}")
+    geomean_run_data.print(has_min_chan_widths)
 
 if __name__ == "__main__":
     run_test_main(sys.argv[1:])
