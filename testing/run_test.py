@@ -9,6 +9,7 @@ from multiprocessing import Pool
 from subprocess import Popen, PIPE, TimeoutExpired
 import pathlib
 import shutil
+import math
 
 # Helper method to get the architecture file name from a directory.
 def get_arch_file_from_dir(dir_path):
@@ -20,17 +21,31 @@ def get_arch_file_from_dir(dir_path):
     return res[0]
 
 # Helper method to parse the config file for vpr command line arguments.
-def get_vpr_args_from_config(config_file):
+def get_vpr_args_from_config(config_file, circuit_name):
+    vpr_args = []
     with open(config_file, 'r') as f:
         for line in f:
             if line.startswith("script_params="):
-                script_params = line.split("=", 1)[1].strip()
-                if script_params == "":
-                    return []
-                # Split the script_params string into individual parameters
-                params_list = script_params.split(" ")
-                return params_list
-    return None
+                 script_params = line.split("=", 1)[1].strip()
+                 if script_params == "":
+                     continue;
+                 # Split the script_params string into individual parameters
+                 params_list = script_params.split(" ")
+                 vpr_args += params_list
+            if line.startswith("special_params="):
+                special_params = line.split("=", 1)[1].strip()
+                if special_params == "":
+                    continue;
+                if special_params == "--1.3W":
+                    # Get the minimum channel width from pre-caculated daya (Master)
+                    min_w = get_min_chan_width(circuit_name, os.path.dirname(config_file))
+                    # Multiply it by 1.3 to make it low-stress
+                    w = float(min_w) * 1.3
+                    # Round up to nearest multiple of 2
+                    w = 2.0 * math.ceil(w / 2.0)
+                    # Set it as the route channel width
+                    vpr_args += ["--route_chan_width", str(int(w))]
+    return vpr_args
 
 def get_min_chan_width(circuit, config_dir):
     min_chan_width_file = config_dir + "/min_w.txt"
@@ -135,7 +150,7 @@ def run_vpr_route(thread_args):
     place_file = circuit_base + ".place"
     net_file = circuit_base + ".net"
 
-    config_args = get_vpr_args_from_config(config_file)
+    config_args = get_vpr_args_from_config(config_file, circuit_name)
 
     # Check if an sdc file exists and if so add it to the args
     sdc_args = []
