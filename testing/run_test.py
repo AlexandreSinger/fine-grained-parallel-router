@@ -123,6 +123,32 @@ def command_parser(prog=None):
         metavar="TIMEOUT",
     )
 
+    parser.add_argument(
+        "-T",
+        default=0,
+        type=int,
+        metavar="NUM_THREAD",
+    )
+
+    parser.add_argument(
+        "-Q",
+        default=0,
+        type=int,
+        metavar="NUM_QUEUES",
+    )
+
+    parser.add_argument(
+        "-direct-draining",
+        action='store_true'
+    )
+
+    parser.add_argument(
+        "-thread-affinity",
+        default="",
+        type=str,
+        metavar="THREAD_AFFINITY"
+    )
+
     return parser
 
 # Run a single circuit through VPR route flow.
@@ -316,6 +342,14 @@ def run_test_main(arg_list, prog=None):
             min_chan_width = get_min_chan_width(circuit, config_dir)
             assert(min_chan_width != None)
             circuit_extra_vpr_args += ["--route_chan_width", str(min_chan_width)];
+        if args.T != 0:
+            circuit_extra_vpr_args += ["--multi_queue_num_threads", str(args.T)]
+        if args.Q != 0:
+            circuit_extra_vpr_args += ["--multi_queue_num_queues", str(args.Q)]
+        if args.direct_draining:
+            circuit_extra_vpr_args += ["--multi_queue_direct_draining", "on"]
+        if args.thread_affinity != "":
+            circuit_extra_vpr_args += ["--thread_affinity", args.thread_affinity]
 
         thread_args.append([reference_dir + "/" + circuit + "/common", circuit_common_path, circuit, arch, args.vtr_dir, config_dir + "/config.txt", circuit_extra_vpr_args, args.timeout])
 
