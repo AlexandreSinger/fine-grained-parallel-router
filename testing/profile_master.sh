@@ -23,7 +23,7 @@ EXTRA_VPR_ARGS=""
 
 # A* NO DIRECT DRAINING
 echo "=============== RUNNING A* ==============="
-EXTRA_VPR_ARGS="--astar_fac 0.9 --astar_offset ${OFFSET}"
+EXTRA_VPR_ARGS="--astar_fac 1.0 --astar_offset ${OFFSET}"
 ./run_test.py $TEST_SUITE -j$NUM_CORES -timeout $TIMEOUT -extra-vpr-args "$EXTRA_VPR_ARGS" -tests-reference-dir-base $TEST_REF_DIR
 
 # Dijkstra's
