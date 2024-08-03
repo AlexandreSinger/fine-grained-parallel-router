@@ -192,7 +192,7 @@ def run_vpr_route(thread_args):
     # Check if the router lookahead file exists and if so add it to the args
     router_lookahead_args = []
     router_lookahead_file = circuit_base + ".router_lookahead.capnp"
-    if os.path.isfile(rr_graph_file):
+    if os.path.isfile(router_lookahead_file):
         router_lookahead_args = ["--read_router_lookahead", router_lookahead_file]
 
     # Run the process with the correct arguments
