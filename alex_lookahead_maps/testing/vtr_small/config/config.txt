@@ -1,0 +1,35 @@
+##############################################
+# Configuration file for running experiments
+##############################################
+
+# Path to directory of circuits to use
+circuits_dir=benchmarks/verilog
+
+# Path to directory of architectures to use
+archs_dir=arch/timing
+
+# Add architectures to list to sweep
+arch_list_add=k6_frac_N10_frac_chain_mem32K_40nm.xml
+
+# Add circuits to list to sweep
+circuit_list_add=or1200.v
+circuit_list_add=blob_merge.v
+circuit_list_add=mkPktMerge.v
+
+# Constrain the circuits to their devices
+circuit_constraint_list_add=(or1200.v,           device=vtr_small)
+circuit_constraint_list_add=(blob_merge.v,       device=vtr_small)
+circuit_constraint_list_add=(mkPktMerge.v,       device=vtr_small)
+
+# Parse info and how to parse
+parse_file=vpr_fixed_chan_width.txt
+
+# How to parse QoR info
+# qor_parse_file=qor_ap_fixed_chan_width.txt
+qor_parse_file=qor_fg_parallel_router_fixed_chan_width.txt
+
+# Pass requirements
+pass_requirements_file=pass_requirements.txt
+
+# A* Poupakis Map Router Lookahead
+script_params=-no_second_run -track_memory_usage -crit_path_router_iterations 100 --route_chan_width 160 --enable_parallel_connection_router on --multi_queue_num_threads 4 --multi_queue_num_queues 16 --astar_fac 1.0 --post_target_prune_fac 1.0 --post_target_prune_offset 0.0 --multi_queue_direct_draining off --read_router_lookahead ../../../../../../may_18_maps/lookahead_map_vtr_small_160_emap-like.capnp
